@@ -79,6 +79,7 @@ public struct TrackKey: Hashable, Codable, Sendable {
 public enum TrackOperationStatus: String, Codable, Equatable, Sendable {
     case added
     case removed
+    case wouldRemove = "would_remove"
     case skippedDuplicate = "skipped_duplicate"
     case notFound = "not_found"
     case permissionDenied = "permission_denied"
@@ -108,13 +109,15 @@ public struct TrackOperationResult: Codable, Equatable, Sendable {
 
 public struct WorkflowReport: Codable, Equatable, Sendable {
     public let results: [TrackOperationResult]
+    public let removalConfirmationFingerprint: String?
 
-    public init(results: [TrackOperationResult]) {
+    public init(results: [TrackOperationResult], removalConfirmationFingerprint: String? = nil) {
         self.results = results
+        self.removalConfirmationFingerprint = removalConfirmationFingerprint
     }
 
     public var exitCode: Int32 {
-        let successful: Set<TrackOperationStatus> = [.added, .removed, .skippedDuplicate]
+        let successful: Set<TrackOperationStatus> = [.added, .removed, .wouldRemove, .skippedDuplicate]
         return results.allSatisfy { successful.contains($0.status) } ? 0 : 5
     }
 }

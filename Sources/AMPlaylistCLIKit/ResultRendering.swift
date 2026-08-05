@@ -21,6 +21,7 @@ public enum ResultRenderer {
         switch status {
         case .added: "已添加"
         case .removed: "已删除"
+        case .wouldRemove: "将删除"
         case .skippedDuplicate: "已跳过重复项"
         case .notFound: "未找到"
         case .permissionDenied: "权限不足"
