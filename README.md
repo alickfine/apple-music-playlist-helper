@@ -1,6 +1,31 @@
 # Apple Music 播放列表助手
 
-这是一个本机 macOS 命令行工具：输入准确的 Apple Music 目录 ID、曲名、艺人和国区链接后，把尚未存在的曲目依次加入指定播放列表。它不需要 Apple Developer Program，也不把 Apple Music 账号凭据交给第三方服务。
+这是一个本机 macOS 自然语言技能和底层命令行助手：用户可以描述任意曲风、任意 Apple Music 商店区域和任意数量的歌曲，把尚未存在的曲目依次加入指定播放列表。它不需要 Apple Developer Program，也不把 Apple Music 账号凭据交给第三方服务。
+
+## 自然语言 Skill
+
+安装到 Codex 的默认全局技能目录：
+
+```bash
+./scripts/install-skill-local.sh
+```
+
+也可以安装到任意技能根目录：
+
+```bash
+./scripts/install-skill-local.sh /你选择的技能根目录
+```
+
+安装后可直接对 Codex 说：
+
+- “把这些 Apple Music 链接加入我的通勤播放列表，先检查重复项。”
+- “推荐 35 首适合晚餐的歌，加入晚餐列表。”
+- “按加拿大区查找这些歌曲，直接加入收藏。”
+- “只检查这 135 首哪些已在健身列表，不要修改。”
+
+技能不固定曲风、区域或数量。区域依次采用当次请求、Apple Music 链接、用户默认配置和 macOS 系统区域；仍无法确定时只询问一次。用户列出的歌曲全部保留；推荐请求没有数量时会询问，不会自行默认 10 首或 20 首。
+
+技能目录完全自包含，首次使用时在技能内部构建 Swift 助手。安装过程不会预先携带二进制，不下载文件，也不修改 shell 配置。新安装的技能可能需要新建 Codex 任务后才出现在技能列表中。
 
 ## 工作方式与安全边界
 
@@ -24,7 +49,7 @@
 
 工具只做无提示权限检查，不会主动弹出或代替你确认系统授权。
 
-## 构建与安装
+## 命令行高级用法：构建与安装
 
 在项目目录运行：
 
@@ -59,13 +84,13 @@ rm "$HOME/.local/bin/am-playlist"
       "id": "905228611",
       "name": "被遗忘的时光",
       "artist": "蔡琴",
-      "url": "https://music.apple.com/cn/song/905228611?i=905228611"
+      "url": "https://music.apple.com/ca/song/905228611?i=905228611"
     }
   ]
 }
 ```
 
-`id` 必须只含 ASCII 数字；`url` 必须使用 `https://music.apple.com`，并且唯一的 `i` 参数必须与 `id` 完全一致。建议先确认曲目在中国大陆 Apple Music 目录中仍可搜索。
+`id` 必须只含 ASCII 数字；`url` 必须使用 `https://music.apple.com`，并且唯一的 `i` 参数必须与 `id` 完全一致。写入前应确认曲目在用户所用 Apple Music 商店区域中仍可搜索。
 
 ## 使用方法
 
@@ -110,7 +135,7 @@ am-playlist add --playlist "试音" --input Fixtures/tracks.example.json
 
 “权限不足”：到“系统设置”→“隐私与安全性”→“辅助功能”授权实际运行命令的终端或 Codex；若脚本读取失败，再检查同一页面附近的“自动化”权限。
 
-“未找到与目录 ID 准确匹配的曲目”：先在“音乐”中确认该国区链接能打开对应单曲，并确认页面已加载完成。工具不会退回到近似曲名点击。
+“未找到与目录 ID 准确匹配的曲目”：先在“音乐”中确认对应区域的链接能打开该单曲，并确认页面已加载完成。工具不会退回到近似曲名点击。
 
 “播放列表不存在”：先在“音乐”中手动创建，或在明确需要时添加 `--create`。
 
@@ -121,6 +146,8 @@ am-playlist add --playlist "试音" --input Fixtures/tracks.example.json
 ```bash
 swift test
 swift build -c release
+zsh Tests/SkillPackageTests/package-contract.sh
+zsh Tests/SkillPackageTests/portable-bootstrap.sh
 ```
 
 自动测试使用注入的假客户端，不会启动或修改“音乐”App。

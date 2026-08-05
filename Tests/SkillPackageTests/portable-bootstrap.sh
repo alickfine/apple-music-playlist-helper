@@ -5,8 +5,13 @@ set -euo pipefail
 临时根目录=$(mktemp -d)
 trap 'rm -rf -- "${临时根目录}"' EXIT
 
-cp -R "${仓库根目录}/skill/apple-music-playlist" "${临时根目录}/apple-music-playlist"
-复制技能="${临时根目录}/apple-music-playlist"
+安装根目录="${临时根目录}/skills"
+zsh "${仓库根目录}/scripts/install-skill-local.sh" "${安装根目录}"
+复制技能="${安装根目录}/apple-music-playlist"
+
+[[ -f "${复制技能}/SKILL.md" ]] || { print -u2 '安装副本缺少 SKILL.md'; exit 1; }
+[[ ! -e "${复制技能}/.git" ]] || { print -u2 '安装副本不应包含 Git 元数据'; exit 1; }
+[[ ! -e "${复制技能}/assets/helper/.build" ]] || { print -u2 '安装初始包不应包含预编译产物'; exit 1; }
 
 输出=$(zsh "${复制技能}/scripts/bootstrap.sh" --print-binary)
 规范技能="${复制技能:A}"
