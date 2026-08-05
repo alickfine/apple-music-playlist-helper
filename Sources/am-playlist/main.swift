@@ -4,11 +4,24 @@ import Foundation
 import MusicAccessibilityDriver
 import PlaylistCore
 
+private enum CommandExecutionError: LocalizedError {
+    case removeNotImplemented
+
+    var errorDescription: String? {
+        switch self {
+        case .removeNotImplemented: "remove 命令暂未实现，已安全拒绝执行。"
+        }
+    }
+}
+
 @main
 struct AMPlaylistCommand {
     static func main() async {
         do {
             let options = try CLIOptions.parse(Array(CommandLine.arguments.dropFirst()))
+            guard options.command != .remove else {
+                throw CommandExecutionError.removeNotImplemented
+            }
             let data = try Data(contentsOf: options.input)
             let source = try JSONDecoder().decode(TrackInputDocument.self, from: data)
             let playlist = try options.resolvedPlaylist(documentPlaylist: source.playlist)

@@ -4,17 +4,19 @@ import XCTest
 import PlaylistCore
 
 final class CLIOptionsTests: XCTestCase {
-    func testRequiresAddSubcommandAndInput() {
+    func testRequiresSubcommandAndInput() {
         XCTAssertThrowsError(try CLIOptions.parse([]))
         XCTAssertThrowsError(try CLIOptions.parse(["list"]))
         XCTAssertThrowsError(try CLIOptions.parse(["add"]))
+        XCTAssertThrowsError(try CLIOptions.parse(["remove"]))
     }
 
-    func testParsesAllSupportedOptions() throws {
+    func testParsesAllAddOptions() throws {
         let options = try CLIOptions.parse([
             "add", "--playlist", "试音", "--input", "/tmp/tracks.json", "--create",
             "--dry-run", "--play-first", "--timeout", "12", "--json"
         ])
+        XCTAssertEqual(options.command, .add)
         XCTAssertEqual(options.playlist, "试音")
         XCTAssertEqual(options.input.path, "/tmp/tracks.json")
         XCTAssertTrue(options.create)
@@ -27,6 +29,7 @@ final class CLIOptionsTests: XCTestCase {
     func testParsesRemoveWithInput() throws {
         let options = try CLIOptions.parse(["remove", "--input", "/tmp/removals.json"])
 
+        XCTAssertEqual(options.command, .remove)
         XCTAssertEqual(options.input.path, "/tmp/removals.json")
     }
 
