@@ -59,6 +59,11 @@ if ! rg -q '不得.*替换.*目录 ID|不得.*目录 ID.*替换' "${技能目录
   print -u2 '技能缺少禁止目录版本替换的安全边界'
   exit 1
 fi
+if ! rg -q '空播放列表' "${技能目录}/SKILL.md" ||
+   ! rg -q '候选恰好为一项' "${技能目录}/SKILL.md"; then
+  print -u2 '技能缺少空播放列表的精确 AX 校验与唯一候选桥接规则'
+  exit 1
+fi
 
 while IFS= read -r 文件; do
   if file "${文件}" | rg -q 'Mach-O'; then

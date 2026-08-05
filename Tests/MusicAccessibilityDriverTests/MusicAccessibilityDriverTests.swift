@@ -51,25 +51,104 @@ final class MusicAccessibilityDriverTests: XCTestCase {
         XCTAssertEqual(provider.pressedPaths.count, 1)
     }
 
+    func testCannotCompletePressIsAcceptedOnlyWhenTheExpectedMenuPostconditionExists() async throws {
+        let provider = FakeAccessibilityProvider(
+            trees: [trackTree, menuTree],
+            pressErrors: [
+                .init(indices: [0, 0]): AccessibilityDriverError.pressFailed(-25204, "more"),
+                .init(indices: [0, 0, 0]): AccessibilityDriverError.pressFailed(-25204, "playlist")
+            ]
+        )
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider, urlOpener: FakeURLOpener(), scripts: MusicScriptReader(runner: NoopRunner()), pollInterval: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .seconds(1))
+
+        XCTAssertEqual(result, .submitted)
+        XCTAssertEqual(provider.pressedPaths.count, 2)
+    }
+
+    func testFallsBackToExactAXValidatedScriptBridgeWhenEmptyPlaylistIsMissingFromMenu() async throws {
+        let dragTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
+            .init(role: "AXRow", value: "试音"),
+            .init(identifier: "track-lockup-905228600-905228611", role: "AXGroup", children: [
+                .init(role: "AXButton", title: "更多")
+            ])
+        ])
+        let provider = FakeAccessibilityProvider(trees: [trackTree, missingPlaylistMenuTree, dragTree])
+        let opener = FakeURLOpener()
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider, urlOpener: opener, scripts: MusicScriptReader(runner: NoopRunner()), pollInterval: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .seconds(1))
+
+        XCTAssertEqual(result, .submitted)
+        XCTAssertEqual(provider.cancelledPaths, [.init(indices: [0])])
+        XCTAssertEqual(opener.openedURLs, [track.url, track.url])
+    }
+
+    func testStaleMenuCancelFallsBackToEscapeBeforeExactBridge() async throws {
+        let dragTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
+            .init(role: "AXRow", value: "试音"),
+            .init(identifier: "track-lockup-905228600-905228611", role: "AXGroup", children: [
+                .init(role: "AXButton", title: "更多")
+            ])
+        ])
+        let provider = FakeAccessibilityProvider(
+            trees: [trackTree, missingPlaylistMenuTree, dragTree],
+            cancelError: AccessibilityDriverError.invalidPath
+        )
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider, urlOpener: FakeURLOpener(), scripts: MusicScriptReader(runner: NoopRunner()), pollInterval: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .seconds(1))
+
+        XCTAssertEqual(result, .submitted)
+        XCTAssertEqual(provider.sentKeys, [.escape])
+    }
+
+    func testSuccessfulCancelStillUsesEscapeWhenMenuPostconditionRemainsOpenBeforeBridge() async throws {
+        let dragTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
+            .init(role: "AXStaticText", value: "试音"),
+            .init(identifier: "track-lockup-905228600-905228611", role: "AXGroup", children: [
+                .init(role: "AXButton", title: "更多")
+            ])
+        ])
+        let provider = FakeAccessibilityProvider(trees: [
+            trackTree, missingPlaylistMenuTree, missingPlaylistMenuTree, dragTree
+        ])
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider, urlOpener: FakeURLOpener(), scripts: MusicScriptReader(runner: NoopRunner()), pollInterval: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .seconds(1))
+
+        XCTAssertEqual(result, .submitted)
+        XCTAssertEqual(provider.sentKeys, [.escape])
+    }
+
     func testProviderRecordsExactSearchInteraction() throws {
         let provider = FakeAccessibilityProvider(trees: [emptyTree])
         let searchPath = AccessibilityPath(indices: [0, 1])
 
         try provider.setValue("被遗忘的时光 蔡琴", path: searchPath)
         try provider.send(.commandF)
-        try provider.send(.downArrow)
         try provider.send(.returnKey)
 
         XCTAssertEqual(
             provider.setValues,
             [.init(value: "被遗忘的时光 蔡琴", path: searchPath)]
         )
-        XCTAssertEqual(provider.sentKeys, [.commandF, .downArrow, .returnKey])
+        XCTAssertEqual(provider.sentKeys, [.commandF, .returnKey])
     }
 
     func testFallsBackToExactSearchResultAndRevalidatesAlbumTrack() async throws {
         let provider = FakeAccessibilityProvider(trees: [
             emptyTree,
+            sidebarSearchTree,
             searchFieldTree,
             topSearchTrackTree,
             trackTree,
@@ -88,17 +167,18 @@ final class MusicAccessibilityDriverTests: XCTestCase {
 
         XCTAssertEqual(result, .submitted)
         XCTAssertEqual(opener.openedURLs, [track.url])
-        XCTAssertEqual(provider.sentKeys, [.commandF, .downArrow, .returnKey])
+        XCTAssertEqual(provider.sentKeys, [.returnKey])
         XCTAssertEqual(provider.setValues, [.init(value: "被遗忘的时光 蔡琴", path: .init(indices: [0]))])
         XCTAssertEqual(
             provider.pressedPaths,
-            [.init(indices: [0]), .init(indices: [0, 0]), .init(indices: [0, 0])]
+            [.init(indices: [0]), .init(indices: [0]), .init(indices: [0, 0]), .init(indices: [0, 0])]
         )
     }
 
     func testFallsBackThroughExactAlbumResultWhenTrackIsNotTopResult() async throws {
         let provider = FakeAccessibilityProvider(trees: [
             emptyTree,
+            sidebarSearchTree,
             searchFieldTree,
             albumSearchResultTree,
             trackTree,
@@ -115,12 +195,13 @@ final class MusicAccessibilityDriverTests: XCTestCase {
         let result = try await driver.add(track, to: "试音", timeout: .seconds(1))
 
         XCTAssertEqual(result, .submitted)
-        XCTAssertEqual(provider.pressedPaths.first, .init(indices: [1]))
+        XCTAssertEqual(provider.pressedPaths.dropFirst().first, .init(indices: [1]))
     }
 
     func testSearchFallbackRejectsWrongCatalogAndAlbumIDs() async throws {
         let provider = FakeAccessibilityProvider(trees: [
             emptyTree,
+            sidebarSearchTree,
             searchFieldTree,
             wrongSearchResultsTree
         ])
@@ -135,12 +216,13 @@ final class MusicAccessibilityDriverTests: XCTestCase {
         let result = try await driver.add(track, to: "试音", timeout: .milliseconds(5))
 
         XCTAssertEqual(result, .notFound)
-        XCTAssertTrue(provider.pressedPaths.isEmpty)
+        XCTAssertEqual(provider.pressedPaths, [.init(indices: [0])])
     }
 
     func testSearchResultMustBeRevalidatedOnAlbumPage() async throws {
         let provider = FakeAccessibilityProvider(trees: [
             emptyTree,
+            sidebarSearchTree,
             searchFieldTree,
             topSearchTrackTree,
             emptyTree
@@ -156,13 +238,19 @@ final class MusicAccessibilityDriverTests: XCTestCase {
         let result = try await driver.add(track, to: "试音", timeout: .milliseconds(8))
 
         XCTAssertEqual(result, .notFound)
-        XCTAssertEqual(provider.pressedPaths, [.init(indices: [0])])
+        XCTAssertEqual(provider.pressedPaths, [.init(indices: [0]), .init(indices: [0])])
     }
 
     private var emptyTree: AccessibilityNodeSnapshot { .init(role: "AXWindow") }
     private var searchFieldTree: AccessibilityNodeSnapshot {
         .init(role: "AXWindow", children: [
-            .init(identifier: "Music.searchField", role: "AXSearchField")
+            .init(identifier: "Music.searchField", role: "AXSearchField"),
+            .init(identifier: "Music.shelfItem.SearchLandingBrickLockup[id=brick-lockup-1]", role: "AXCell")
+        ])
+    }
+    private var sidebarSearchTree: AccessibilityNodeSnapshot {
+        .init(role: "AXWindow", children: [
+            .init(role: "AXRow", title: "搜索")
         ])
     }
     private var topSearchTrackTree: AccessibilityNodeSnapshot {
@@ -197,25 +285,46 @@ final class MusicAccessibilityDriverTests: XCTestCase {
             .init(role: "AXMenu", children: [.init(role: "AXMenuItem", title: "试音")])
         ])
     }
+    private var missingPlaylistMenuTree: AccessibilityNodeSnapshot {
+        .init(role: "AXWindow", children: [.init(role: "AXMenu")])
+    }
 }
 
 private final class FakeAccessibilityProvider: AccessibilityProviding, @unchecked Sendable {
     private var trees: [AccessibilityNodeSnapshot]
+    private var pressErrors: [AccessibilityPath: AccessibilityDriverError]
+    private let cancelError: AccessibilityDriverError?
     private(set) var pressedPaths: [AccessibilityPath] = []
     private(set) var setValues: [SetValueCall] = []
     private(set) var sentKeys: [MusicKeyStroke] = []
+    private(set) var cancelledPaths: [AccessibilityPath] = []
     private(set) var treeReadCount = 0
-    init(trees: [AccessibilityNodeSnapshot]) { self.trees = trees }
+    init(
+        trees: [AccessibilityNodeSnapshot],
+        pressErrors: [AccessibilityPath: AccessibilityDriverError] = [:],
+        cancelError: AccessibilityDriverError? = nil
+    ) {
+        self.trees = trees
+        self.pressErrors = pressErrors
+        self.cancelError = cancelError
+    }
     func isAuthorized() -> Bool { true }
     func musicTree() throws -> AccessibilityNodeSnapshot {
         treeReadCount += 1
         return trees.count > 1 ? trees.removeFirst() : trees[0]
     }
-    func press(path: AccessibilityPath) throws { pressedPaths.append(path) }
+    func press(path: AccessibilityPath) throws {
+        pressedPaths.append(path)
+        if let error = pressErrors.removeValue(forKey: path) { throw error }
+    }
     func setValue(_ value: String, path: AccessibilityPath) throws {
         setValues.append(.init(value: value, path: path))
     }
     func send(_ keyStroke: MusicKeyStroke) throws { sentKeys.append(keyStroke) }
+    func cancel(path: AccessibilityPath) throws {
+        cancelledPaths.append(path)
+        if let cancelError { throw cancelError }
+    }
 }
 
 private struct SetValueCall: Equatable {

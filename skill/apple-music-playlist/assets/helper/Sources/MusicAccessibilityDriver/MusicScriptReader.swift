@@ -62,6 +62,24 @@ public struct MusicScriptReader: Sendable {
         _ = try await execute(script)
     }
 
+    public func duplicateUniqueLibraryTrack(_ track: CatalogTrack, to playlistName: String) async throws {
+        let quotedPlaylist = try javaScriptLiteral(playlistName)
+        let quotedName = try javaScriptLiteral(track.name)
+        let quotedArtist = try javaScriptLiteral(track.artist)
+        let script = """
+        const app = Application('Music');
+        const lists = app.userPlaylists().filter(p => p.name() === \(quotedPlaylist));
+        if (lists.length !== 1) throw new Error('目标播放列表不唯一');
+        const matches = app.libraryPlaylists()[0].tracks().filter(t =>
+          t.name() === \(quotedName) &&
+          t.artist() === \(quotedArtist)
+        );
+        if (matches.length !== 1) throw new Error('资料库曲目不唯一');
+        app.duplicate(matches[0], {to: lists[0]});
+        """
+        _ = try await execute(script)
+    }
+
     public func remove(_ track: RemovalTrack, from playlistName: String) async throws {
         let quotedPlaylist = try javaScriptLiteral(playlistName)
         let quotedDatabaseID = try javaScriptLiteral(track.databaseID)

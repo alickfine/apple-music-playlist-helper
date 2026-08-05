@@ -5,6 +5,7 @@ public struct AccessibilityNodeSnapshot: Equatable, Sendable {
     public let role: String?
     public let title: String?
     public let description: String?
+    public let value: String?
     public let children: [AccessibilityNodeSnapshot]
 
     public init(
@@ -12,12 +13,14 @@ public struct AccessibilityNodeSnapshot: Equatable, Sendable {
         role: String? = nil,
         title: String? = nil,
         description: String? = nil,
+        value: String? = nil,
         children: [AccessibilityNodeSnapshot] = []
     ) {
         self.identifier = identifier
         self.role = role
         self.title = title
         self.description = description
+        self.value = value
         self.children = children
     }
 }
@@ -29,8 +32,8 @@ public struct AccessibilityPath: Equatable, Hashable, Sendable {
 
 public enum MusicKeyStroke: Equatable, Sendable {
     case commandF
-    case downArrow
     case returnKey
+    case escape
 }
 
 public protocol AccessibilityProviding: Sendable {
@@ -39,6 +42,7 @@ public protocol AccessibilityProviding: Sendable {
     func press(path: AccessibilityPath) throws
     func setValue(_ value: String, path: AccessibilityPath) throws
     func send(_ keyStroke: MusicKeyStroke) throws
+    func cancel(path: AccessibilityPath) throws
 }
 
 public protocol URLOpening: Sendable {

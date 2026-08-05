@@ -39,6 +39,23 @@ final class MusicScriptReaderTests: XCTestCase {
         XCTAssertFalse(script.contains("userPlaylists.push"))
     }
 
+    func testExactAXBridgeDuplicatesOnlyOneUniqueLibraryTrack() async throws {
+        let runner = CapturingProcessRunner()
+        let track = CatalogTrack(
+            id: "905228635", name: "渡口", artist: "蔡琴",
+            url: URL(string: "https://music.apple.com/cn/song/905228635?i=905228635")!
+        )
+
+        try await MusicScriptReader(runner: runner).duplicateUniqueLibraryTrack(track, to: "临时测试")
+
+        let script = await runner.lastScript
+        XCTAssertTrue(script.contains("lists.length !== 1"))
+        XCTAssertTrue(script.contains("t.name() === \"渡口\""))
+        XCTAssertTrue(script.contains("t.artist() === \"蔡琴\""))
+        XCTAssertTrue(script.contains("matches.length !== 1"))
+        XCTAssertTrue(script.contains("app.duplicate(matches[0], {to: lists[0]})"))
+    }
+
     func testNullMeansPlaylistDoesNotExist() async throws {
         let runner = FakeProcessRunner(results: [
             .init(exitCode: 0, stdout: Data("null\n".utf8), stderr: Data())

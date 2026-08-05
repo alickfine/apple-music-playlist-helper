@@ -1,11 +1,85 @@
 import Foundation
 
 public enum AccessibilityMatcher {
+    public static func menu(in root: AccessibilityNodeSnapshot) -> AccessibilityPath? {
+        findPopupMenu(node: root, path: [], insideMenuBar: false)
+    }
+
+    private static func findPopupMenu(
+        node: AccessibilityNodeSnapshot,
+        path: [Int],
+        insideMenuBar: Bool
+    ) -> AccessibilityPath? {
+        let nestedInMenuBar = insideMenuBar || node.role == "AXMenuBar"
+        if node.role == "AXMenu" && !nestedInMenuBar { return AccessibilityPath(indices: path) }
+        for (index, child) in node.children.enumerated() {
+            if let match = findPopupMenu(
+                node: child,
+                path: path + [index],
+                insideMenuBar: nestedInMenuBar
+            ) { return match }
+        }
+        return nil
+    }
+
     public static func trackMoreButton(
         catalogID: String,
         in root: AccessibilityNodeSnapshot
     ) -> AccessibilityPath? {
         findCatalogContainer(catalogID: catalogID, node: root, path: [])
+    }
+
+    public static func trackContainer(
+        catalogID: String,
+        in root: AccessibilityNodeSnapshot
+    ) -> AccessibilityPath? {
+        findExactTrackContainer(catalogID: catalogID, node: root, path: [])
+    }
+
+    private static func findExactTrackContainer(
+        catalogID: String,
+        node: AccessibilityNodeSnapshot,
+        path: [Int]
+    ) -> AccessibilityPath? {
+        if nodeContainsExactNumericToken(node, token: catalogID),
+           find(node: node, path: [], predicate: isMoreButton) != nil {
+            return AccessibilityPath(indices: path)
+        }
+        for (index, child) in node.children.enumerated() {
+            if let match = findExactTrackContainer(catalogID: catalogID, node: child, path: path + [index]) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    public static func sidebarPlaylistRow(
+        named name: String,
+        in root: AccessibilityNodeSnapshot
+    ) -> AccessibilityPath? {
+        findSidebarDestination(named: name, node: root, path: [], nearestRow: nil)
+    }
+
+    private static func findSidebarDestination(
+        named name: String,
+        node: AccessibilityNodeSnapshot,
+        path: [Int],
+        nearestRow: AccessibilityPath?
+    ) -> AccessibilityPath? {
+        let row = node.role == "AXRow" ? AccessibilityPath(indices: path) : nearestRow
+        let isExact = [node.title, node.description, node.value]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .contains(name)
+        if isExact { return row ?? AccessibilityPath(indices: path) }
+        for (index, child) in node.children.enumerated() {
+            if let match = findSidebarDestination(
+                named: name,
+                node: child,
+                path: path + [index],
+                nearestRow: row
+            ) { return match }
+        }
+        return nil
     }
 
     public static func playlistMenuItem(
@@ -24,6 +98,25 @@ public enum AccessibilityMatcher {
             return [node.identifier, node.title, node.description]
                 .compactMap { $0?.localizedLowercase }
                 .contains { $0.contains("search") || $0.contains("搜索") }
+        }
+    }
+
+    public static func readySearchField(in root: AccessibilityNodeSnapshot) -> AccessibilityPath? {
+        let isSearchScreen = find(node: root, path: []) { node in
+            guard let identifier = node.identifier else { return false }
+            return identifier.contains("TopSearchLockup")
+                || identifier.contains("SearchLandingBrickLockup")
+        } != nil
+        guard isSearchScreen else { return nil }
+        return searchField(in: root)
+    }
+
+    public static func sidebarSearchRow(in root: AccessibilityNodeSnapshot) -> AccessibilityPath? {
+        find(node: root, path: []) { node in
+            guard node.role == "AXRow" else { return false }
+            return [node.title, node.description]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase }
+                .contains { $0 == "搜索" || $0 == "search" }
         }
     }
 
