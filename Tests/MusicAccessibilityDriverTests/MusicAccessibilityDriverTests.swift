@@ -67,7 +67,124 @@ final class MusicAccessibilityDriverTests: XCTestCase {
         XCTAssertEqual(provider.sentKeys, [.commandF, .downArrow, .returnKey])
     }
 
+    func testFallsBackToExactSearchResultAndRevalidatesAlbumTrack() async throws {
+        let provider = FakeAccessibilityProvider(trees: [
+            emptyTree,
+            searchFieldTree,
+            topSearchTrackTree,
+            trackTree,
+            menuTree
+        ])
+        let opener = FakeURLOpener()
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider,
+            urlOpener: opener,
+            scripts: MusicScriptReader(runner: NoopRunner()),
+            pollInterval: .zero,
+            directLookupTimeout: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .seconds(1))
+
+        XCTAssertEqual(result, .submitted)
+        XCTAssertEqual(opener.openedURLs, [track.url])
+        XCTAssertEqual(provider.sentKeys, [.commandF, .downArrow, .returnKey])
+        XCTAssertEqual(provider.setValues, [.init(value: "被遗忘的时光 蔡琴", path: .init(indices: [0]))])
+        XCTAssertEqual(
+            provider.pressedPaths,
+            [.init(indices: [0]), .init(indices: [0, 0]), .init(indices: [0, 0])]
+        )
+    }
+
+    func testFallsBackThroughExactAlbumResultWhenTrackIsNotTopResult() async throws {
+        let provider = FakeAccessibilityProvider(trees: [
+            emptyTree,
+            searchFieldTree,
+            albumSearchResultTree,
+            trackTree,
+            menuTree
+        ])
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider,
+            urlOpener: FakeURLOpener(),
+            scripts: MusicScriptReader(runner: NoopRunner()),
+            pollInterval: .zero,
+            directLookupTimeout: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .seconds(1))
+
+        XCTAssertEqual(result, .submitted)
+        XCTAssertEqual(provider.pressedPaths.first, .init(indices: [1]))
+    }
+
+    func testSearchFallbackRejectsWrongCatalogAndAlbumIDs() async throws {
+        let provider = FakeAccessibilityProvider(trees: [
+            emptyTree,
+            searchFieldTree,
+            wrongSearchResultsTree
+        ])
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider,
+            urlOpener: FakeURLOpener(),
+            scripts: MusicScriptReader(runner: NoopRunner()),
+            pollInterval: .milliseconds(1),
+            directLookupTimeout: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .milliseconds(5))
+
+        XCTAssertEqual(result, .notFound)
+        XCTAssertTrue(provider.pressedPaths.isEmpty)
+    }
+
+    func testSearchResultMustBeRevalidatedOnAlbumPage() async throws {
+        let provider = FakeAccessibilityProvider(trees: [
+            emptyTree,
+            searchFieldTree,
+            topSearchTrackTree,
+            emptyTree
+        ])
+        let driver = MusicAccessibilityDriver(
+            accessibility: provider,
+            urlOpener: FakeURLOpener(),
+            scripts: MusicScriptReader(runner: NoopRunner()),
+            pollInterval: .milliseconds(1),
+            directLookupTimeout: .zero
+        )
+
+        let result = try await driver.add(track, to: "试音", timeout: .milliseconds(8))
+
+        XCTAssertEqual(result, .notFound)
+        XCTAssertEqual(provider.pressedPaths, [.init(indices: [0])])
+    }
+
     private var emptyTree: AccessibilityNodeSnapshot { .init(role: "AXWindow") }
+    private var searchFieldTree: AccessibilityNodeSnapshot {
+        .init(role: "AXWindow", children: [
+            .init(identifier: "Music.searchField", role: "AXSearchField")
+        ])
+    }
+    private var topSearchTrackTree: AccessibilityNodeSnapshot {
+        .init(role: "AXWindow", children: [
+            .init(
+                identifier: "Music.shelfItem.TopSearchLockup[id=top-search-section-top-905228611,parentId=top-search-section-top]",
+                role: "AXCell"
+            )
+        ])
+    }
+    private var albumSearchResultTree: AccessibilityNodeSnapshot {
+        .init(role: "AXWindow", children: [
+            .init(identifier: "Music.shelfItem.TopSearchLockup[id=top-search-section-top-777,parentId=top-search-section-top]", role: "AXCell"),
+            .init(identifier: "Music.shelfItem.SquareLockup[id=square-section-album-905228600,parentId=square-section-album]", role: "AXGroup")
+        ])
+    }
+    private var wrongSearchResultsTree: AccessibilityNodeSnapshot {
+        .init(role: "AXWindow", children: [
+            .init(identifier: "Music.shelfItem.TopSearchLockup[id=top-search-section-top-905228612,parentId=top-search-section-top]", role: "AXCell"),
+            .init(identifier: "Music.shelfItem.SquareLockup[id=square-section-album-905228601,parentId=square-section-album]", role: "AXGroup")
+        ])
+    }
     private var trackTree: AccessibilityNodeSnapshot {
         .init(role: "AXWindow", children: [
             .init(identifier: "song-905228611", role: "AXRow", children: [

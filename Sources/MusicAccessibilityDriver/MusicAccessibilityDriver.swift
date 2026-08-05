@@ -8,17 +8,20 @@ public struct MusicAccessibilityDriver: MusicAppClient, Sendable {
     private let urlOpener: any URLOpening
     private let scripts: MusicScriptReader
     private let pollInterval: Duration
+    private let directLookupTimeout: Duration
 
     public init(
         accessibility: any AccessibilityProviding = AXMusicAccessibilityProvider(),
         urlOpener: any URLOpening = MusicURLOpener(),
         scripts: MusicScriptReader = MusicScriptReader(),
-        pollInterval: Duration = .milliseconds(150)
+        pollInterval: Duration = .milliseconds(150),
+        directLookupTimeout: Duration = .seconds(1)
     ) {
         self.accessibility = accessibility
         self.urlOpener = urlOpener
         self.scripts = scripts
         self.pollInterval = pollInterval
+        self.directLookupTimeout = directLookupTimeout
     }
 
     public func accessibilityAuthorized() async -> Bool {
@@ -41,23 +44,62 @@ public struct MusicAccessibilityDriver: MusicAppClient, Sendable {
         try await urlOpener.openInMusic(track.url)
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
+        let directDeadline = min(deadline, clock.now.advanced(by: directLookupTimeout))
 
+        if let more = try await poll(until: directDeadline, matching: { tree in
+            AccessibilityMatcher.trackMoreButton(catalogID: track.id, in: tree)
+        }) {
+            return try submit(more: more, to: playlist)
+        }
+
+        guard clock.now < deadline else { return .notFound }
+        try accessibility.send(.commandF)
+        guard let searchField = try await poll(until: deadline, matching: { tree in
+            AccessibilityMatcher.searchField(in: tree)
+        }) else { return .notFound }
+
+        try accessibility.setValue("\(track.name) \(track.artist)", path: searchField)
+        if pollInterval > .zero {
+            try await Task.sleep(for: pollInterval)
+        }
+        try accessibility.send(.downArrow)
+        try accessibility.send(.returnKey)
+
+        guard let result = try await poll(until: deadline, matching: { tree in
+            AccessibilityMatcher.topSearchResult(catalogID: track.id, in: tree)
+                ?? track.albumID.flatMap { AccessibilityMatcher.albumSearchResult(albumID: $0, in: tree) }
+        }) else { return .notFound }
+        try accessibility.press(path: result)
+
+        guard let more = try await poll(until: deadline, matching: { tree in
+            AccessibilityMatcher.trackMoreButton(catalogID: track.id, in: tree)
+        }) else { return .notFound }
+        return try submit(more: more, to: playlist)
+    }
+
+    private func poll(
+        until deadline: ContinuousClock.Instant,
+        matching: @Sendable (AccessibilityNodeSnapshot) -> AccessibilityPath?
+    ) async throws -> AccessibilityPath? {
+        let clock = ContinuousClock()
         while true {
             let tree = try accessibility.musicTree()
-            if let more = AccessibilityMatcher.trackMoreButton(catalogID: track.id, in: tree) {
-                try accessibility.press(path: more)
-                let menuTree = try accessibility.musicTree()
-                guard let target = AccessibilityMatcher.playlistMenuItem(named: playlist, in: menuTree) else {
-                    return .notFound
-                }
-                try accessibility.press(path: target)
-                return .submitted
-            }
-            guard clock.now < deadline else { return .notFound }
+            if let match = matching(tree) { return match }
+            guard clock.now < deadline else { return nil }
             if pollInterval > .zero {
                 try await Task.sleep(for: pollInterval)
             }
         }
+    }
+
+    private func submit(more: AccessibilityPath, to playlist: String) throws -> AddTrackOutcome {
+        try accessibility.press(path: more)
+        let menuTree = try accessibility.musicTree()
+        guard let target = AccessibilityMatcher.playlistMenuItem(named: playlist, in: menuTree) else {
+            return .notFound
+        }
+        try accessibility.press(path: target)
+        return .submitted
     }
 
     public func remove(_ track: RemovalTrack, from playlist: String) async throws {
