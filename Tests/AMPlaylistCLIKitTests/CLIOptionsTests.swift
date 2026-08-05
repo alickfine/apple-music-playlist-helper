@@ -24,6 +24,20 @@ final class CLIOptionsTests: XCTestCase {
         XCTAssertTrue(options.json)
     }
 
+    func testParsesRemoveWithInput() throws {
+        let options = try CLIOptions.parse(["remove", "--input", "/tmp/removals.json"])
+
+        XCTAssertEqual(options.input.path, "/tmp/removals.json")
+    }
+
+    func testRejectsCreateForRemove() {
+        XCTAssertThrowsError(try CLIOptions.parse(["remove", "--input", "removals.json", "--create"]))
+    }
+
+    func testRejectsPlayFirstForRemove() {
+        XCTAssertThrowsError(try CLIOptions.parse(["remove", "--input", "removals.json", "--play-first"]))
+    }
+
     func testDefaultTimeoutIsEightSeconds() throws {
         XCTAssertEqual(try CLIOptions.parse(["add", "--input", "a.json"]).timeoutSeconds, 8)
     }

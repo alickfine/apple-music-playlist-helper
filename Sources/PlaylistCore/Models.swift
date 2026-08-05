@@ -24,6 +24,24 @@ public struct TrackInputDocument: Codable, Equatable, Sendable {
     }
 }
 
+public struct RemovalTrack: Codable, Equatable, Sendable {
+    public let databaseID: String
+
+    public init(databaseID: String) {
+        self.databaseID = databaseID
+    }
+}
+
+public struct RemovalInputDocument: Codable, Equatable, Sendable {
+    public let playlist: String?
+    public let tracks: [RemovalTrack]
+
+    public init(playlist: String? = nil, tracks: [RemovalTrack]) {
+        self.playlist = playlist
+        self.tracks = tracks
+    }
+}
+
 public struct TrackKey: Hashable, Codable, Sendable {
     public let name: String
     public let artist: String

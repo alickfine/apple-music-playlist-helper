@@ -3,10 +3,12 @@ import Foundation
 public struct PlaylistTrack: Codable, Equatable, Sendable {
     public let name: String
     public let artist: String
+    public let databaseID: String?
 
-    public init(name: String, artist: String) {
+    public init(name: String, artist: String, databaseID: String? = nil) {
         self.name = name
         self.artist = artist
+        self.databaseID = databaseID
     }
 
     public var key: TrackKey { TrackKey(name: name, artist: artist) }
