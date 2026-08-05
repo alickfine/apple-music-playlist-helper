@@ -7,56 +7,125 @@ final class RemovalWorkflowTests: XCTestCase {
 
     func testDryRunWithExactMatchDoesNotWrite() async {
         let client = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
+        let receiptStore = InMemoryRemovalReceiptStore()
 
-        let report = await RemovalWorkflow(client: client).run(
+        let report = await RemovalWorkflow(client: client, receiptStore: receiptStore).run(
             document: .init(playlist: "试音", tracks: [target]), options: .init(dryRun: true)
         )
 
         XCTAssertEqual(report.results.map(\.status), [.wouldRemove])
-        XCTAssertNotNil(report.removalConfirmationFingerprint)
+        XCTAssertNotNil(report.removalReceiptToken)
         let removeCount = await client.removeCount
         XCTAssertEqual(removeCount, 0)
     }
 
-    func testActualRemovalRequiresApprovedMatchingDryRunFingerprint() async throws {
+    func testReceiptTokenRejectsMissingReceiptForgedTokenAndReplay() async throws {
         let document = RemovalInputDocument(playlist: "试音", tracks: [target])
-        let dryRunClient = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
-        let dryRunReport = await RemovalWorkflow(client: dryRunClient).run(
-            document: document, options: .init(dryRun: true)
-        )
-        let fingerprint = try XCTUnwrap(dryRunReport.removalConfirmationFingerprint)
+        let snapshot = PlaylistSnapshot(name: "试音", tracks: [target.playlistTrack])
+        let receiptStore = InMemoryRemovalReceiptStore()
+        let dryRun = await RemovalWorkflow(
+            client: RemovalFakeMusicAppClient(playlist: snapshot), receiptStore: receiptStore
+        ).run(document: document, options: .init(dryRun: true))
+        let receiptToken = try XCTUnwrap(dryRun.removalReceiptToken)
 
-        let noApprovalClient = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
-        _ = await RemovalWorkflow(client: noApprovalClient).run(document: document, options: .init())
-        let noApprovalWrites = await noApprovalClient.removeCount
+        let missingReceiptClient = RemovalFakeMusicAppClient(playlist: snapshot)
+        _ = await RemovalWorkflow(
+            client: missingReceiptClient, receiptStore: InMemoryRemovalReceiptStore()
+        ).run(document: document, options: .init(approval: .init(approved: true, receiptToken: receiptToken)))
 
-        let noFingerprintClient = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
-        _ = await RemovalWorkflow(client: noFingerprintClient).run(
-            document: document, options: .init(approval: .init(approved: true, confirmationFingerprint: nil))
-        )
-        let noFingerprintWrites = await noFingerprintClient.removeCount
+        let forgedTokenClient = RemovalFakeMusicAppClient(playlist: snapshot)
+        _ = await RemovalWorkflow(
+            client: forgedTokenClient, receiptStore: receiptStore
+        ).run(document: document, options: .init(approval: .init(approved: true, receiptToken: "伪造收据")))
 
-        let wrongFingerprintClient = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
-        _ = await RemovalWorkflow(client: wrongFingerprintClient).run(
-            document: document, options: .init(approval: .init(approved: true, confirmationFingerprint: "错误指纹"))
-        )
-        let wrongFingerprintWrites = await wrongFingerprintClient.removeCount
+        let unapprovedClient = RemovalFakeMusicAppClient(playlist: snapshot)
+        _ = await RemovalWorkflow(
+            client: unapprovedClient, receiptStore: receiptStore
+        ).run(document: document, options: .init(approval: .init(approved: false, receiptToken: receiptToken)))
 
-        let verifiedClient = RemovalFakeMusicAppClient(
-            playlist: .init(name: "试音", tracks: [target.playlistTrack]),
-            verificationSnapshots: [.init(name: "试音", tracks: [])]
+        let approvedClient = RemovalFakeMusicAppClient(
+            playlist: snapshot, verificationSnapshots: [.init(name: "试音", tracks: [])]
         )
-        let verifiedReport = await RemovalWorkflow(client: verifiedClient).run(
-            document: document,
-            options: .init(approval: .init(approved: true, confirmationFingerprint: fingerprint))
-        )
-        let verifiedWrites = await verifiedClient.removeCount
+        let approvedReport = await RemovalWorkflow(
+            client: approvedClient, receiptStore: receiptStore
+        ).run(document: document, options: .init(approval: .init(approved: true, receiptToken: receiptToken)))
 
-        XCTAssertEqual(noApprovalWrites, 0)
-        XCTAssertEqual(noFingerprintWrites, 0)
-        XCTAssertEqual(wrongFingerprintWrites, 0)
-        XCTAssertEqual(verifiedReport.results.map(\.status), [.removed])
-        XCTAssertEqual(verifiedWrites, 1)
+        let replayClient = RemovalFakeMusicAppClient(playlist: snapshot)
+        _ = await RemovalWorkflow(
+            client: replayClient, receiptStore: receiptStore
+        ).run(document: document, options: .init(approval: .init(approved: true, receiptToken: receiptToken)))
+
+        let missingReceiptWrites = await missingReceiptClient.removeCount
+        let forgedTokenWrites = await forgedTokenClient.removeCount
+        let unapprovedWrites = await unapprovedClient.removeCount
+        let approvedWrites = await approvedClient.removeCount
+        let replayWrites = await replayClient.removeCount
+        XCTAssertEqual(missingReceiptWrites, 0)
+        XCTAssertEqual(forgedTokenWrites, 0)
+        XCTAssertEqual(unapprovedWrites, 0)
+        XCTAssertEqual(approvedReport.results.map(\.status), [.removed])
+        XCTAssertEqual(approvedWrites, 1)
+        XCTAssertEqual(replayWrites, 0)
+    }
+
+    func testReceiptRejectsAnyPlaylistSnapshotChangeBeforeWriting() async throws {
+        let document = RemovalInputDocument(playlist: "试音", tracks: [target])
+        let drySnapshot = PlaylistSnapshot(name: "试音", tracks: [target.playlistTrack])
+        let receiptStore = InMemoryRemovalReceiptStore()
+        let dryRun = await RemovalWorkflow(
+            client: RemovalFakeMusicAppClient(playlist: drySnapshot), receiptStore: receiptStore
+        ).run(document: document, options: .init(dryRun: true))
+        let receiptToken = try XCTUnwrap(dryRun.removalReceiptToken)
+        let changedSnapshot = PlaylistSnapshot(name: "试音", tracks: [target.playlistTrack, other.playlistTrack])
+        let actualClient = RemovalFakeMusicAppClient(playlist: changedSnapshot)
+
+        let report = await RemovalWorkflow(client: actualClient, receiptStore: receiptStore).run(
+            document: document, options: .init(approval: .init(approved: true, receiptToken: receiptToken))
+        )
+
+        XCTAssertEqual(report.results.map(\.status), [.failed])
+        let removeCount = await actualClient.removeCount
+        XCTAssertEqual(removeCount, 0)
+    }
+
+    func testReceiptFromMissingDryRunCannotAuthorizeLaterUniqueMatch() async throws {
+        let document = RemovalInputDocument(playlist: "试音", tracks: [target])
+        let missingSnapshot = PlaylistSnapshot(
+            name: "试音", tracks: [.init(name: target.name, artist: "其他艺人", databaseID: target.databaseID)]
+        )
+        let receiptStore = InMemoryRemovalReceiptStore()
+        let dryRun = await RemovalWorkflow(
+            client: RemovalFakeMusicAppClient(playlist: missingSnapshot), receiptStore: receiptStore
+        ).run(document: document, options: .init(dryRun: true))
+        let receiptToken = try XCTUnwrap(dryRun.removalReceiptToken)
+        let actualClient = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
+
+        let report = await RemovalWorkflow(client: actualClient, receiptStore: receiptStore).run(
+            document: document, options: .init(approval: .init(approved: true, receiptToken: receiptToken))
+        )
+
+        XCTAssertEqual(report.results.map(\.status), [.failed])
+        let removeCount = await actualClient.removeCount
+        XCTAssertEqual(removeCount, 0)
+    }
+
+    func testReceiptFromAmbiguousDryRunCannotAuthorizeLaterUniqueMatch() async throws {
+        let document = RemovalInputDocument(playlist: "试音", tracks: [target])
+        let ambiguousSnapshot = PlaylistSnapshot(name: "试音", tracks: [target.playlistTrack, target.playlistTrack])
+        let receiptStore = InMemoryRemovalReceiptStore()
+        let dryRun = await RemovalWorkflow(
+            client: RemovalFakeMusicAppClient(playlist: ambiguousSnapshot), receiptStore: receiptStore
+        ).run(document: document, options: .init(dryRun: true))
+        let receiptToken = try XCTUnwrap(dryRun.removalReceiptToken)
+        let actualClient = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
+
+        let report = await RemovalWorkflow(client: actualClient, receiptStore: receiptStore).run(
+            document: document, options: .init(approval: .init(approved: true, receiptToken: receiptToken))
+        )
+
+        XCTAssertEqual(report.results.map(\.status), [.failed])
+        let removeCount = await actualClient.removeCount
+        XCTAssertEqual(removeCount, 0)
     }
 
     func testVerificationReadFailureRequiresRecoveryBeforeLaterWrite() async throws {
@@ -65,16 +134,19 @@ final class RemovalWorkflowTests: XCTestCase {
         let recovered = PlaylistSnapshot(name: "试音", tracks: [other.playlistTrack])
         let afterSecondRemoval = PlaylistSnapshot(name: "试音", tracks: [])
         let dryRunClient = RemovalFakeMusicAppClient(playlist: initial)
-        let dryRunReport = await RemovalWorkflow(client: dryRunClient).run(document: document, options: .init(dryRun: true))
-        let fingerprint = try XCTUnwrap(dryRunReport.removalConfirmationFingerprint)
+        let receiptStore = InMemoryRemovalReceiptStore()
+        let dryRunReport = await RemovalWorkflow(client: dryRunClient, receiptStore: receiptStore).run(
+            document: document, options: .init(dryRun: true)
+        )
+        let receiptToken = try XCTUnwrap(dryRunReport.removalReceiptToken)
         let client = RemovalFakeMusicAppClient(
             playlist: initial,
             playlistOutcomes: [.snapshot(initial), .failure, .snapshot(recovered), .snapshot(afterSecondRemoval)]
         )
 
-        let report = await RemovalWorkflow(client: client).run(
+        let report = await RemovalWorkflow(client: client, receiptStore: receiptStore).run(
             document: document,
-            options: .init(approval: .init(approved: true, confirmationFingerprint: fingerprint))
+            options: .init(approval: .init(approved: true, receiptToken: receiptToken))
         )
 
         XCTAssertEqual(report.results.map(\.status), [.verificationFailed, .removed])
@@ -97,9 +169,9 @@ final class RemovalWorkflowTests: XCTestCase {
         let after = PlaylistSnapshot(name: "试音", tracks: [])
         let client = RemovalFakeMusicAppClient(playlist: before, verificationSnapshots: [after])
         let document = RemovalInputDocument(playlist: "试音", tracks: [target])
-        let approval = try await approval(for: document, snapshot: before)
+        let (receiptStore, approval) = try await approval(for: document, snapshot: before)
 
-        let report = await RemovalWorkflow(client: client).run(
+        let report = await RemovalWorkflow(client: client, receiptStore: receiptStore).run(
             document: document, options: .init(approval: approval)
         )
 
@@ -114,9 +186,9 @@ final class RemovalWorkflowTests: XCTestCase {
         let snapshot = PlaylistSnapshot(name: "试音", tracks: [missing, ambiguous, ambiguous])
         let client = RemovalFakeMusicAppClient(playlist: snapshot)
         let document = RemovalInputDocument(playlist: "试音", tracks: [target, other])
-        let approval = try await approval(for: document, snapshot: snapshot)
+        let (receiptStore, approval) = try await approval(for: document, snapshot: snapshot)
 
-        let report = await RemovalWorkflow(client: client).run(
+        let report = await RemovalWorkflow(client: client, receiptStore: receiptStore).run(
             document: document, options: .init(approval: approval)
         )
 
@@ -129,9 +201,9 @@ final class RemovalWorkflowTests: XCTestCase {
         let before = PlaylistSnapshot(name: "试音", tracks: [target.playlistTrack])
         let client = RemovalFakeMusicAppClient(playlist: before, verificationSnapshots: [before])
         let document = RemovalInputDocument(playlist: "试音", tracks: [target])
-        let approval = try await approval(for: document, snapshot: before)
+        let (receiptStore, approval) = try await approval(for: document, snapshot: before)
 
-        let report = await RemovalWorkflow(client: client).run(
+        let report = await RemovalWorkflow(client: client, receiptStore: receiptStore).run(
             document: document, options: .init(approval: approval)
         )
 
@@ -149,9 +221,9 @@ final class RemovalWorkflowTests: XCTestCase {
             verificationSnapshots: [afterSecondRemoval]
         )
         let document = RemovalInputDocument(playlist: "试音", tracks: [target, other])
-        let approval = try await approval(for: document, snapshot: before)
+        let (receiptStore, approval) = try await approval(for: document, snapshot: before)
 
-        let report = await RemovalWorkflow(client: client).run(
+        let report = await RemovalWorkflow(client: client, receiptStore: receiptStore).run(
             document: document, options: .init(approval: approval)
         )
 
@@ -160,10 +232,16 @@ final class RemovalWorkflowTests: XCTestCase {
         XCTAssertEqual(removeCount, 2)
     }
 
-    private func approval(for document: RemovalInputDocument, snapshot: PlaylistSnapshot) async throws -> RemovalApproval {
+    private func approval(
+        for document: RemovalInputDocument,
+        snapshot: PlaylistSnapshot
+    ) async throws -> (InMemoryRemovalReceiptStore, RemovalApproval) {
         let client = RemovalFakeMusicAppClient(playlist: snapshot)
-        let report = await RemovalWorkflow(client: client).run(document: document, options: .init(dryRun: true))
-        return .init(approved: true, confirmationFingerprint: try XCTUnwrap(report.removalConfirmationFingerprint))
+        let receiptStore = InMemoryRemovalReceiptStore()
+        let report = await RemovalWorkflow(client: client, receiptStore: receiptStore).run(
+            document: document, options: .init(dryRun: true)
+        )
+        return (receiptStore, .init(approved: true, receiptToken: try XCTUnwrap(report.removalReceiptToken)))
     }
 }
 

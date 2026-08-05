@@ -109,11 +109,11 @@ public struct TrackOperationResult: Codable, Equatable, Sendable {
 
 public struct WorkflowReport: Codable, Equatable, Sendable {
     public let results: [TrackOperationResult]
-    public let removalConfirmationFingerprint: String?
+    public let removalReceiptToken: String?
 
-    public init(results: [TrackOperationResult], removalConfirmationFingerprint: String? = nil) {
+    public init(results: [TrackOperationResult], removalReceiptToken: String? = nil) {
         self.results = results
-        self.removalConfirmationFingerprint = removalConfirmationFingerprint
+        self.removalReceiptToken = removalReceiptToken
     }
 
     public var exitCode: Int32 {

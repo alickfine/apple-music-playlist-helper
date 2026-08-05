@@ -3,11 +3,11 @@ import Foundation
 
 public struct RemovalApproval: Sendable, Equatable {
     public let approved: Bool
-    public let confirmationFingerprint: String?
+    public let receiptToken: String?
 
-    public init(approved: Bool, confirmationFingerprint: String?) {
+    public init(approved: Bool, receiptToken: String?) {
         self.approved = approved
-        self.confirmationFingerprint = confirmationFingerprint
+        self.receiptToken = receiptToken
     }
 }
 
@@ -25,9 +25,11 @@ public struct RemovalWorkflowOptions: Sendable, Equatable {
 
 public struct RemovalWorkflow: Sendable {
     private let client: any MusicAppClient
+    private let receiptStore: any RemovalReceiptStore
 
-    public init(client: any MusicAppClient) {
+    public init(client: any MusicAppClient, receiptStore: any RemovalReceiptStore) {
         self.client = client
+        self.receiptStore = receiptStore
     }
 
     public func run(document: RemovalInputDocument, options: RemovalWorkflowOptions) async -> WorkflowReport {
@@ -38,28 +40,51 @@ public struct RemovalWorkflow: Sendable {
         }
 
         let playlistName = options.playlistName ?? document.playlist ?? "试音"
-        let confirmationFingerprint = fingerprint(playlistName: playlistName, tracks: document.tracks)
-        let initialSnapshot: PlaylistSnapshot
+        let snapshot: PlaylistSnapshot
         do {
             guard let playlist = try await client.playlist(named: playlistName) else {
                 return missingPlaylistReport(playlistName)
             }
-            initialSnapshot = playlist
+            snapshot = playlist
         } catch {
             return WorkflowReport(results: [
                 .init(track: nil, status: .failed, message: "读取播放列表失败：\(error.localizedDescription)")
             ])
         }
 
-        guard options.dryRun || hasValidApproval(options.approval, fingerprint: confirmationFingerprint) else {
+        let artifact = receiptArtifact(playlistName: playlistName, document: document, snapshot: snapshot)
+        if options.dryRun {
+            let token = await receiptStore.issue(artifact)
+            return WorkflowReport(
+                results: dryRunResults(for: artifact.matchResults),
+                removalReceiptToken: token
+            )
+        }
+
+        guard let approval = options.approval, approval.approved, let token = approval.receiptToken,
+              let storedArtifact = await receiptStore.receipt(for: token) else {
+            return rejectedApprovalReport(document.tracks)
+        }
+        guard storedArtifact == artifact else {
             return WorkflowReport(results: document.tracks.map {
                 .init(
                     track: nil, removalTrack: $0, status: .failed,
-                    message: "未获得与本次清单一致的明确删除批准；请先执行试运行并使用其确认指纹。"
+                    message: "删除收据与当前播放列表快照或清单不一致；未执行删除，请重新试运行。"
                 )
             })
         }
+        guard await receiptStore.consume(token: token, matching: artifact) else {
+            return rejectedApprovalReport(document.tracks)
+        }
 
+        return await executeApprovedRemoval(document: document, playlistName: playlistName, initialSnapshot: snapshot)
+    }
+
+    private func executeApprovedRemoval(
+        document: RemovalInputDocument,
+        playlistName: String,
+        initialSnapshot: PlaylistSnapshot
+    ) async -> WorkflowReport {
         var snapshot: PlaylistSnapshot? = initialSnapshot
         var results: [TrackOperationResult] = []
         for unvalidatedTrack in document.tracks {
@@ -86,10 +111,7 @@ public struct RemovalWorkflow: Sendable {
             do {
                 track = try unvalidatedTrack.validated()
             } catch {
-                results.append(.init(
-                    track: nil, removalTrack: unvalidatedTrack, status: .failed,
-                    message: error.localizedDescription
-                ))
+                results.append(.init(track: nil, removalTrack: unvalidatedTrack, status: .failed, message: error.localizedDescription))
                 continue
             }
 
@@ -104,21 +126,10 @@ public struct RemovalWorkflow: Sendable {
                 continue
             }
 
-            if options.dryRun {
-                results.append(.init(
-                    track: nil, removalTrack: track, status: .wouldRemove,
-                    message: "试运行：将从播放列表中删除此曲目。"
-                ))
-                continue
-            }
-
             do {
                 try await client.remove(track, from: playlistName)
             } catch {
-                results.append(.init(
-                    track: nil, removalTrack: track, status: .failed,
-                    message: "删除失败：\(error.localizedDescription)"
-                ))
+                results.append(.init(track: nil, removalTrack: track, status: .failed, message: "删除失败：\(error.localizedDescription)"))
                 continue
             }
 
@@ -139,10 +150,7 @@ public struct RemovalWorkflow: Sendable {
                     ))
                     continue
                 }
-                results.append(.init(
-                    track: nil, removalTrack: track, status: .removed,
-                    message: "已从播放列表删除并通过写后复核。"
-                ))
+                results.append(.init(track: nil, removalTrack: track, status: .removed, message: "已从播放列表删除并通过写后复核。"))
             } catch {
                 snapshot = nil
                 results.append(.init(
@@ -151,10 +159,54 @@ public struct RemovalWorkflow: Sendable {
                 ))
             }
         }
-        return WorkflowReport(
-            results: results,
-            removalConfirmationFingerprint: options.dryRun ? confirmationFingerprint : nil
+        return WorkflowReport(results: results)
+    }
+
+    private func receiptArtifact(
+        playlistName: String,
+        document: RemovalInputDocument,
+        snapshot: PlaylistSnapshot
+    ) -> RemovalReceiptArtifact {
+        let matchResults = document.tracks.map { track in
+            guard (try? track.validated()) != nil else {
+                return RemovalReceiptMatch(track: track, exactMatchCount: -1)
+            }
+            let count = snapshot.tracks.filter {
+                $0.databaseID == track.databaseID && $0.name == track.name && $0.artist == track.artist
+            }.count
+            return RemovalReceiptMatch(track: track, exactMatchCount: count)
+        }
+        return RemovalReceiptArtifact(
+            playlistName: playlistName,
+            tracks: document.tracks,
+            playlistSnapshotFingerprint: snapshotFingerprint(snapshot),
+            matchResults: matchResults,
+            wouldRemoveTracks: matchResults.filter { $0.exactMatchCount == 1 }.map(\.track)
         )
+    }
+
+    private func dryRunResults(for matchResults: [RemovalReceiptMatch]) -> [TrackOperationResult] {
+        matchResults.map { match in
+            switch match.exactMatchCount {
+            case 1:
+                .init(track: nil, removalTrack: match.track, status: .wouldRemove, message: "试运行：将从播放列表中删除此曲目。")
+            case 0:
+                .init(track: nil, removalTrack: match.track, status: .notFound, message: matchFailureMessage(count: 0))
+            case let count where count > 1:
+                .init(track: nil, removalTrack: match.track, status: .notFound, message: matchFailureMessage(count: count))
+            default:
+                .init(track: nil, removalTrack: match.track, status: .failed, message: invalidTrackMessage(match.track))
+            }
+        }
+    }
+
+    private func rejectedApprovalReport(_ tracks: [RemovalTrack]) -> WorkflowReport {
+        WorkflowReport(results: tracks.map {
+            .init(
+                track: nil, removalTrack: $0, status: .failed,
+                message: "未获得尚未消费且与本次清单一致的删除收据；请先执行试运行。"
+            )
+        })
     }
 
     private func missingPlaylistReport(_ name: String) -> WorkflowReport {
@@ -170,20 +222,33 @@ public struct RemovalWorkflow: Sendable {
         return "目标播放列表中发现 \(count) 个数据库 ID、曲名和艺人均精确匹配的曲目，匹配不唯一，未执行删除。"
     }
 
-    private func hasValidApproval(_ approval: RemovalApproval?, fingerprint: String) -> Bool {
-        approval?.approved == true && approval?.confirmationFingerprint == fingerprint
+    private func invalidTrackMessage(_ track: RemovalTrack) -> String {
+        do {
+            _ = try track.validated()
+            return "删除项无效。"
+        } catch {
+            return error.localizedDescription
+        }
     }
 
-    private func fingerprint(playlistName: String, tracks: [RemovalTrack]) -> String {
-        var data = Data(playlistName.utf8)
-        for track in tracks {
-            for value in [track.databaseID, track.name, track.artist] {
-                let valueData = Data(value.utf8)
-                var length = UInt64(valueData.count).bigEndian
-                withUnsafeBytes(of: &length) { data.append(contentsOf: $0) }
-                data.append(valueData)
-            }
+    private func snapshotFingerprint(_ snapshot: PlaylistSnapshot) -> String {
+        var data = Data()
+        append(snapshot.name, to: &data)
+        var count = UInt64(snapshot.tracks.count).bigEndian
+        withUnsafeBytes(of: &count) { data.append(contentsOf: $0) }
+        for track in snapshot.tracks {
+            append(track.name, to: &data)
+            append(track.artist, to: &data)
+            append(track.databaseID ?? "", to: &data)
+            data.append(track.databaseID == nil ? 0 : 1)
         }
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func append(_ value: String, to data: inout Data) {
+        let valueData = Data(value.utf8)
+        var length = UInt64(valueData.count).bigEndian
+        withUnsafeBytes(of: &length) { data.append(contentsOf: $0) }
+        data.append(valueData)
     }
 }
