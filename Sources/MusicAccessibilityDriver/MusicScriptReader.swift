@@ -32,13 +32,15 @@ public struct MusicScriptReader: Sendable {
         const app = Application('Music');
         const wanted = \(quotedName);
         const lists = app.userPlaylists().filter(p => p.name() === wanted);
+        let output;
         if (lists.length === 0) {
-          console.log('null');
+          output = 'null';
         } else {
           const p = lists[0];
           const tracks = p.tracks().map(t => ({name: t.name(), artist: t.artist()}));
-          console.log(JSON.stringify({name: p.name(), tracks: tracks}));
+          output = JSON.stringify({name: p.name(), tracks: tracks});
         }
+        output;
         """
         let output = try await execute(script)
         if String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "null" {

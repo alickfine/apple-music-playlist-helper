@@ -42,6 +42,12 @@ final class MusicScriptReaderTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("没有自动化权限"))
         }
     }
+
+    func testJXAReturnsJSONOnStandardOutputInsteadOfConsoleDiagnostic() async throws {
+        let runner = OutputChannelCheckingRunner()
+        let snapshot = try await MusicScriptReader(runner: runner).playlist(named: "试音")
+        XCTAssertEqual(snapshot?.tracks.count, 1)
+    }
 }
 
 private actor FakeProcessRunner: ProcessRunning {
@@ -50,5 +56,16 @@ private actor FakeProcessRunner: ProcessRunning {
 
     func run(executable: URL, arguments: [String], stdin: Data?) throws -> ProcessResult {
         results.removeFirst()
+    }
+}
+
+private actor OutputChannelCheckingRunner: ProcessRunning {
+    func run(executable: URL, arguments: [String], stdin: Data?) throws -> ProcessResult {
+        let script = String(decoding: stdin ?? Data(), as: UTF8.self)
+        let json = Data(#"{"name":"试音","tracks":[{"name":"被遗忘的时光","artist":"蔡琴"}]}"#.utf8)
+        if script.contains("console.log") {
+            return .init(exitCode: 0, stdout: Data(), stderr: json)
+        }
+        return .init(exitCode: 0, stdout: json, stderr: Data())
     }
 }
