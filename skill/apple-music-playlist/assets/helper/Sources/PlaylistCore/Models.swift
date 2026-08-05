@@ -16,9 +16,13 @@ public struct CatalogTrack: Codable, Equatable, Sendable {
 
 public extension CatalogTrack {
     var albumID: String? {
-        url.pathComponents.last { component in
-            !component.isEmpty && component.unicodeScalars.allSatisfy { (48...57).contains($0.value) }
-        }
+        let components = url.pathComponents
+        guard let albumIndex = components.firstIndex(of: "album"),
+              components.indices.contains(albumIndex + 2) else { return nil }
+        let candidate = components[albumIndex + 2]
+        guard !candidate.isEmpty,
+              candidate.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }) else { return nil }
+        return candidate
     }
 }
 

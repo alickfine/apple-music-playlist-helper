@@ -25,6 +25,14 @@ final class TrackValidationTests: XCTestCase {
         XCTAssertNil(try track.validated().albumID)
     }
 
+    func testCatalogTrackDoesNotTreatNumericSongPathAsAlbumID() throws {
+        let track = makeTrack(
+            url: "https://music.apple.com/cn/song/905228611?i=905228611"
+        )
+
+        XCTAssertNil(try track.validated().albumID)
+    }
+
     func testRejectsNonNumericCatalogID() {
         let track = makeTrack(id: "not-a-number")
 
