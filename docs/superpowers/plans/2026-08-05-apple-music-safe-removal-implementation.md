@@ -17,7 +17,7 @@
 
 ---
 
-### 任务1：删除数据模型与命令解析
+### Task 1：删除数据模型与命令解析
 
 **文件：**
 - 修改：`Sources/PlaylistCore/Models.swift`
@@ -33,7 +33,7 @@
 - [ ] 实现最小命令枚举、参数约束和删除输入模型。
 - [ ] 重新运行筛选测试，确认通过。
 
-### 任务2：删除工作流
+### Task 2：删除工作流
 
 **文件：**
 - 创建：`Sources/PlaylistCore/RemovalWorkflow.swift`
@@ -51,7 +51,7 @@
 - [ ] 实现最小删除工作流，并让报告退出码把 `removed` 视为成功。
 - [ ] 更新添加流程假客户端以满足协议，运行 PlaylistCore 全部测试。
 
-### 任务3：Music JXA 精确删除驱动
+### Task 3：Music JXA 精确删除驱动
 
 **文件：**
 - 修改：`Sources/MusicAccessibilityDriver/MusicScriptReader.swift`
@@ -66,7 +66,7 @@
 - [ ] 更新快照 JXA 和删除方法，通过驱动协议暴露。
 - [ ] 运行 MusicAccessibilityDriver 测试并保持既有测试通过。
 
-### 任务4：CLI、技能包装与中文规则
+### Task 4：CLI、技能包装与中文规则
 
 **文件：**
 - 修改：`Sources/am-playlist/main.swift`
@@ -84,7 +84,7 @@
 - [ ] 更新技能规则：只有当前会话明确批准的精确清单才能删除，必须 dry-run，写后复核。
 - [ ] 更新输入规范并运行全部技能包装测试。
 
-### 任务5：同步、完整验证与真实整理
+### Task 5：同步、完整验证与真实整理
 
 **文件：**
 - 同步：`skill/apple-music-playlist/assets/helper/Sources/**`
