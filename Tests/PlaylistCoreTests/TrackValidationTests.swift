@@ -9,6 +9,22 @@ final class TrackValidationTests: XCTestCase {
         XCTAssertEqual(try track.validated(), track)
     }
 
+    func testCatalogTrackExtractsNumericAlbumIDFromValidatedURL() throws {
+        let track = makeTrack(
+            url: "https://music.apple.com/cn/album/example/905228605?i=905228611"
+        )
+
+        XCTAssertEqual(try track.validated().albumID, "905228605")
+    }
+
+    func testCatalogTrackReturnsNilWhenAlbumPathHasNoNumericID() throws {
+        let track = makeTrack(
+            url: "https://music.apple.com/cn/album/example/not-numeric?i=905228611"
+        )
+
+        XCTAssertNil(try track.validated().albumID)
+    }
+
     func testRejectsNonNumericCatalogID() {
         let track = makeTrack(id: "not-a-number")
 

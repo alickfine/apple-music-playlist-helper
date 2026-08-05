@@ -34,4 +34,39 @@ final class AccessibilityMatchingTests: XCTestCase {
         XCTAssertEqual(AccessibilityMatcher.playlistMenuItem(named: "试音", in: tree), .init(indices: [2, 1]))
         XCTAssertNil(AccessibilityMatcher.playlistMenuItem(named: "试", in: tree))
     }
+
+    func testFindsSearchFieldByRole() {
+        let searchTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
+            .init(identifier: "unrelated", role: "AXTextField"),
+            .init(identifier: "Music.searchField", role: "AXSearchField")
+        ])
+
+        XCTAssertEqual(AccessibilityMatcher.searchField(in: searchTree), .init(indices: [1]))
+    }
+
+    func testFindsOnlyExactTopSearchCatalogID() {
+        let searchTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
+            .init(identifier: "Music.shelfItem.TopSearchLockup[id=top-search-section-top-90522863,parentId=top-search-section-top]", role: "AXCell"),
+            .init(identifier: "Music.shelfItem.TopSearchLockup[id=top-search-section-top-905228635,parentId=top-search-section-top]", role: "AXCell")
+        ])
+
+        XCTAssertEqual(
+            AccessibilityMatcher.topSearchResult(catalogID: "905228635", in: searchTree),
+            .init(indices: [1])
+        )
+        XCTAssertNil(AccessibilityMatcher.topSearchResult(catalogID: "9052286", in: searchTree))
+    }
+
+    func testFindsExactAlbumInTopOrSquareSearchResult() {
+        let topTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
+            .init(identifier: "Music.shelfItem.TopSearchLockup[id=top-search-section-top-905228605,parentId=top-search-section-top]", role: "AXCell")
+        ])
+        let squareTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
+            .init(identifier: "Music.shelfItem.SquareLockup[id=square-section-album-905228605,parentId=square-section-album]", role: "AXGroup")
+        ])
+
+        XCTAssertEqual(AccessibilityMatcher.albumSearchResult(albumID: "905228605", in: topTree), .init(indices: [0]))
+        XCTAssertEqual(AccessibilityMatcher.albumSearchResult(albumID: "905228605", in: squareTree), .init(indices: [0]))
+        XCTAssertNil(AccessibilityMatcher.albumSearchResult(albumID: "90522860", in: squareTree))
+    }
 }

@@ -17,6 +17,39 @@ public enum AccessibilityMatcher {
         }
     }
 
+    public static func searchField(in root: AccessibilityNodeSnapshot) -> AccessibilityPath? {
+        find(node: root, path: []) { node in
+            if node.role == "AXSearchField" { return true }
+            guard node.role == "AXTextField" else { return false }
+            return [node.identifier, node.title, node.description]
+                .compactMap { $0?.localizedLowercase }
+                .contains { $0.contains("search") || $0.contains("搜索") }
+        }
+    }
+
+    public static func topSearchResult(
+        catalogID: String,
+        in root: AccessibilityNodeSnapshot
+    ) -> AccessibilityPath? {
+        find(node: root, path: []) { node in
+            guard node.identifier?.contains("TopSearchLockup") == true else { return false }
+            return nodeContainsExactNumericToken(node, token: catalogID)
+        }
+    }
+
+    public static func albumSearchResult(
+        albumID: String,
+        in root: AccessibilityNodeSnapshot
+    ) -> AccessibilityPath? {
+        find(node: root, path: []) { node in
+            guard let identifier = node.identifier,
+                  identifier.contains("TopSearchLockup") || identifier.contains("SquareLockup") else {
+                return false
+            }
+            return nodeContainsExactNumericToken(node, token: albumID)
+        }
+    }
+
     private static func findCatalogContainer(
         catalogID: String,
         node: AccessibilityNodeSnapshot,
