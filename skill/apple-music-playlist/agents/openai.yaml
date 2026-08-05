@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apple Music 播放列表"
+  short_description: "用自然语言查找、去重并添加 Apple Music 曲目"
+  default_prompt: "把我指定的歌曲加入 Apple Music 播放列表，先核对目录和重复项。"
