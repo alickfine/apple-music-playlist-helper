@@ -27,10 +27,18 @@ public struct AccessibilityPath: Equatable, Hashable, Sendable {
     public init(indices: [Int]) { self.indices = indices }
 }
 
+public enum MusicKeyStroke: Equatable, Sendable {
+    case commandF
+    case downArrow
+    case returnKey
+}
+
 public protocol AccessibilityProviding: Sendable {
     func isAuthorized() -> Bool
     func musicTree() throws -> AccessibilityNodeSnapshot
     func press(path: AccessibilityPath) throws
+    func setValue(_ value: String, path: AccessibilityPath) throws
+    func send(_ keyStroke: MusicKeyStroke) throws
 }
 
 public protocol URLOpening: Sendable {

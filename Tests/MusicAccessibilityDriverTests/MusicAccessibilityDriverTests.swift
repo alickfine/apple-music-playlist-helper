@@ -51,6 +51,22 @@ final class MusicAccessibilityDriverTests: XCTestCase {
         XCTAssertEqual(provider.pressedPaths.count, 1)
     }
 
+    func testProviderRecordsExactSearchInteraction() throws {
+        let provider = FakeAccessibilityProvider(trees: [emptyTree])
+        let searchPath = AccessibilityPath(indices: [0, 1])
+
+        try provider.setValue("被遗忘的时光 蔡琴", path: searchPath)
+        try provider.send(.commandF)
+        try provider.send(.downArrow)
+        try provider.send(.returnKey)
+
+        XCTAssertEqual(
+            provider.setValues,
+            [.init(value: "被遗忘的时光 蔡琴", path: searchPath)]
+        )
+        XCTAssertEqual(provider.sentKeys, [.commandF, .downArrow, .returnKey])
+    }
+
     private var emptyTree: AccessibilityNodeSnapshot { .init(role: "AXWindow") }
     private var trackTree: AccessibilityNodeSnapshot {
         .init(role: "AXWindow", children: [
@@ -69,6 +85,8 @@ final class MusicAccessibilityDriverTests: XCTestCase {
 private final class FakeAccessibilityProvider: AccessibilityProviding, @unchecked Sendable {
     private var trees: [AccessibilityNodeSnapshot]
     private(set) var pressedPaths: [AccessibilityPath] = []
+    private(set) var setValues: [SetValueCall] = []
+    private(set) var sentKeys: [MusicKeyStroke] = []
     private(set) var treeReadCount = 0
     init(trees: [AccessibilityNodeSnapshot]) { self.trees = trees }
     func isAuthorized() -> Bool { true }
@@ -77,6 +95,15 @@ private final class FakeAccessibilityProvider: AccessibilityProviding, @unchecke
         return trees.count > 1 ? trees.removeFirst() : trees[0]
     }
     func press(path: AccessibilityPath) throws { pressedPaths.append(path) }
+    func setValue(_ value: String, path: AccessibilityPath) throws {
+        setValues.append(.init(value: value, path: path))
+    }
+    func send(_ keyStroke: MusicKeyStroke) throws { sentKeys.append(keyStroke) }
+}
+
+private struct SetValueCall: Equatable {
+    let value: String
+    let path: AccessibilityPath
 }
 
 private final class FakeURLOpener: URLOpening, @unchecked Sendable {
