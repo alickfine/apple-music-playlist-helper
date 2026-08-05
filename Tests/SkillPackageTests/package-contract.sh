@@ -7,6 +7,14 @@ set -euo pipefail
 [[ -f "${技能目录}/SKILL.md" ]] || { print -u2 '缺少 SKILL.md'; exit 1; }
 [[ -f "${技能目录}/agents/openai.yaml" ]] || { print -u2 '缺少 agents/openai.yaml'; exit 1; }
 [[ ! -e "${技能目录}/README.md" ]] || { print -u2 '技能分发目录不得包含 README.md'; exit 1; }
+[[ -f "${技能目录}/assets/helper/Sources/PlaylistCore/FileRemovalReceiptStore.swift" ]] || {
+  print -u2 '技能分发执行层缺少文件型删除收据存储'
+  exit 1
+}
+[[ -f "${技能目录}/assets/helper/Sources/PlaylistCore/RemovalWorkflow.swift" ]] || {
+  print -u2 '技能分发执行层缺少安全删除工作流'
+  exit 1
+}
 
 名称=$(awk '/^---$/{section++; next} section==1 && /^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}' "${技能目录}/SKILL.md")
 [[ "${名称}" == 'apple-music-playlist' ]] || { print -u2 "技能名错误：${名称}"; exit 1; }

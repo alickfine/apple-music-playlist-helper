@@ -24,6 +24,48 @@ public struct TrackInputDocument: Codable, Equatable, Sendable {
     }
 }
 
+public struct RemovalTrack: Codable, Equatable, Sendable {
+    public let databaseID: String
+    public let name: String
+    public let artist: String
+
+    public init(databaseID: String, name: String, artist: String) {
+        self.databaseID = databaseID
+        self.name = name
+        self.artist = artist
+    }
+
+    public func validated() throws -> RemovalTrack {
+        guard !databaseID.isEmpty,
+              databaseID.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }) else {
+            throw RemovalValidationError.invalidDatabaseID
+        }
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw RemovalValidationError.emptyName
+        }
+        guard !artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw RemovalValidationError.emptyArtist
+        }
+        return self
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case databaseID = "databaseId"
+        case name
+        case artist
+    }
+}
+
+public struct RemovalInputDocument: Codable, Equatable, Sendable {
+    public let playlist: String?
+    public let tracks: [RemovalTrack]
+
+    public init(playlist: String? = nil, tracks: [RemovalTrack]) {
+        self.playlist = playlist
+        self.tracks = tracks
+    }
+}
+
 public struct TrackKey: Hashable, Codable, Sendable {
     public let name: String
     public let artist: String
@@ -36,6 +78,8 @@ public struct TrackKey: Hashable, Codable, Sendable {
 
 public enum TrackOperationStatus: String, Codable, Equatable, Sendable {
     case added
+    case removed
+    case wouldRemove = "would_remove"
     case skippedDuplicate = "skipped_duplicate"
     case notFound = "not_found"
     case permissionDenied = "permission_denied"
@@ -46,11 +90,18 @@ public enum TrackOperationStatus: String, Codable, Equatable, Sendable {
 
 public struct TrackOperationResult: Codable, Equatable, Sendable {
     public let track: CatalogTrack?
+    public let removalTrack: RemovalTrack?
     public let status: TrackOperationStatus
     public let message: String
 
-    public init(track: CatalogTrack?, status: TrackOperationStatus, message: String) {
+    public init(
+        track: CatalogTrack?,
+        removalTrack: RemovalTrack? = nil,
+        status: TrackOperationStatus,
+        message: String
+    ) {
         self.track = track
+        self.removalTrack = removalTrack
         self.status = status
         self.message = message
     }
@@ -58,14 +109,35 @@ public struct TrackOperationResult: Codable, Equatable, Sendable {
 
 public struct WorkflowReport: Codable, Equatable, Sendable {
     public let results: [TrackOperationResult]
+    public let removalReceiptToken: String?
 
-    public init(results: [TrackOperationResult]) {
+    public init(results: [TrackOperationResult], removalReceiptToken: String? = nil) {
         self.results = results
+        self.removalReceiptToken = removalReceiptToken
     }
 
     public var exitCode: Int32 {
-        let successful: Set<TrackOperationStatus> = [.added, .skippedDuplicate]
+        let successful: Set<TrackOperationStatus> = [.added, .removed, .wouldRemove, .skippedDuplicate]
         return results.allSatisfy { successful.contains($0.status) } ? 0 : 5
+    }
+}
+
+public enum RemovalValidationError: Error, Equatable, Sendable {
+    case invalidDatabaseID
+    case emptyName
+    case emptyArtist
+}
+
+extension RemovalValidationError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .invalidDatabaseID:
+            "删除项的数据库 ID 必须只包含 ASCII 数字。"
+        case .emptyName:
+            "删除项的曲名不能为空。"
+        case .emptyArtist:
+            "删除项的艺人不能为空。"
+        }
     }
 }
 

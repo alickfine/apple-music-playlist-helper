@@ -26,11 +26,30 @@ final class CLIOptionsTests: XCTestCase {
         XCTAssertTrue(options.json)
     }
 
-    func testParsesRemoveWithInput() throws {
-        let options = try CLIOptions.parse(["remove", "--input", "/tmp/removals.json"])
+    func testParsesRemovalDryRunWithExplicitReceiptDirectoryAndJSON() throws {
+        let options = try CLIOptions.parse([
+            "remove", "--input", "/tmp/removals.json", "--receipt-dir", "/tmp/receipts",
+            "--dry-run", "--json",
+        ])
 
         XCTAssertEqual(options.command, .remove)
         XCTAssertEqual(options.input.path, "/tmp/removals.json")
+        XCTAssertEqual(options.receiptDirectory?.path, "/tmp/receipts")
+        XCTAssertTrue(options.dryRun)
+        XCTAssertTrue(options.json)
+        XCTAssertFalse(options.approved)
+        XCTAssertNil(options.receiptToken)
+    }
+
+    func testParsesApprovedRemovalWithReceiptTokenAndSameDirectory() throws {
+        let options = try CLIOptions.parse([
+            "remove", "--input", "/tmp/removals.json", "--receipt-dir", "/tmp/receipts",
+            "--approved", "--receipt-token", "0123456789abcdef",
+        ])
+
+        XCTAssertTrue(options.approved)
+        XCTAssertEqual(options.receiptToken, "0123456789abcdef")
+        XCTAssertEqual(options.receiptDirectory?.path, "/tmp/receipts")
     }
 
     func testRejectsCreateForRemove() {
@@ -39,6 +58,36 @@ final class CLIOptionsTests: XCTestCase {
 
     func testRejectsPlayFirstForRemove() {
         XCTAssertThrowsError(try CLIOptions.parse(["remove", "--input", "removals.json", "--play-first"]))
+    }
+
+    func testRemovalDryRunRequiresExplicitReceiptDirectoryAndJSON() {
+        XCTAssertThrowsError(try CLIOptions.parse([
+            "remove", "--input", "removals.json", "--dry-run", "--json",
+        ]))
+        XCTAssertThrowsError(try CLIOptions.parse([
+            "remove", "--input", "removals.json", "--receipt-dir", "/tmp/receipts", "--dry-run",
+        ]))
+    }
+
+    func testActualRemovalRequiresApprovalTokenAndReceiptDirectory() {
+        XCTAssertThrowsError(try CLIOptions.parse(["remove", "--input", "removals.json"]))
+        XCTAssertThrowsError(try CLIOptions.parse([
+            "remove", "--input", "removals.json", "--receipt-dir", "/tmp/receipts", "--approved",
+        ]))
+        XCTAssertThrowsError(try CLIOptions.parse([
+            "remove", "--input", "removals.json", "--receipt-dir", "/tmp/receipts",
+            "--receipt-token", "token",
+        ]))
+    }
+
+    func testRejectsReceiptOptionsForAddAndApprovalOptionsForDryRun() {
+        XCTAssertThrowsError(try CLIOptions.parse([
+            "add", "--input", "tracks.json", "--receipt-dir", "/tmp/receipts",
+        ]))
+        XCTAssertThrowsError(try CLIOptions.parse([
+            "remove", "--input", "removals.json", "--receipt-dir", "/tmp/receipts",
+            "--dry-run", "--json", "--approved", "--receipt-token", "token",
+        ]))
     }
 
     func testDefaultTimeoutIsEightSeconds() throws {

@@ -19,6 +19,19 @@ final class RemovalWorkflowTests: XCTestCase {
         XCTAssertEqual(removeCount, 0)
     }
 
+    func testDryRunFailsClosedWhenReceiptCannotBePersisted() async {
+        let client = RemovalFakeMusicAppClient(playlist: .init(name: "试音", tracks: [target.playlistTrack]))
+
+        let report = await RemovalWorkflow(client: client, receiptStore: RejectingReceiptStore()).run(
+            document: .init(playlist: "试音", tracks: [target]), options: .init(dryRun: true)
+        )
+
+        XCTAssertEqual(report.results.map(\.status), [.failed])
+        XCTAssertNil(report.removalReceiptToken)
+        let removeCount = await client.removeCount
+        XCTAssertEqual(removeCount, 0)
+    }
+
     func testReceiptTokenRejectsMissingReceiptForgedTokenAndReplay() async throws {
         let document = RemovalInputDocument(playlist: "试音", tracks: [target])
         let snapshot = PlaylistSnapshot(name: "试音", tracks: [target.playlistTrack])
@@ -243,6 +256,12 @@ final class RemovalWorkflowTests: XCTestCase {
         )
         return (receiptStore, .init(approved: true, receiptToken: try XCTUnwrap(report.removalReceiptToken)))
     }
+}
+
+private actor RejectingReceiptStore: RemovalReceiptStore {
+    func issue(_ artifact: RemovalReceiptArtifact) -> String { "" }
+    func receipt(for token: String) -> RemovalReceiptArtifact? { nil }
+    func consume(token: String, matching artifact: RemovalReceiptArtifact) -> Bool { false }
 }
 
 private extension RemovalTrack {

@@ -10,7 +10,9 @@ public enum ResultRenderer {
         }
         if report.results.isEmpty { return "没有需要处理的曲目。" }
         return report.results.map { result in
-            let subject = result.track.map { "\($0.name) — \($0.artist)" } ?? "播放列表"
+            let subject = result.track.map { "\($0.name) — \($0.artist)" }
+                ?? result.removalTrack.map { "\($0.name) — \($0.artist)" }
+                ?? "播放列表"
             return "[\(label(for: result.status))] \(subject)：\(result.message)"
         }.joined(separator: "\n")
     }
@@ -18,6 +20,8 @@ public enum ResultRenderer {
     private static func label(for status: TrackOperationStatus) -> String {
         switch status {
         case .added: "已添加"
+        case .removed: "已删除"
+        case .wouldRemove: "将删除"
         case .skippedDuplicate: "已跳过重复项"
         case .notFound: "未找到"
         case .permissionDenied: "权限不足"

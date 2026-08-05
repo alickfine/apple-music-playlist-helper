@@ -1,6 +1,6 @@
 ---
 name: apple-music-playlist
-description: Use when a macOS user wants to find, recommend, check, deduplicate, add, create, or play songs in an Apple Music playlist using natural language, Apple Music links, catalog IDs, track names, artists, genres, moods, languages, eras, storefront regions, or an arbitrary-size song list.
+description: Use when a macOS user wants to find, recommend, check, deduplicate, add, remove, create, or play songs in an Apple Music playlist using natural language, Apple Music links, catalog IDs, database IDs, track names, artists, genres, moods, languages, eras, storefront regions, or an arbitrary-size song list.
 ---
 
 # Apple Music 播放列表
@@ -28,6 +28,7 @@ description: Use when a macOS user wants to find, recommend, check, deduplicate,
 - 商店区域；
 - 数量；
 - 是否只检查、直接添加、创建列表或播放首个新增曲目。
+- 是否要从一个明确命名的播放列表删除当前清单，以及用户是否已在当前会话明确批准这份具体清单。
 
 按以下规则处理缺失信息：
 
@@ -62,9 +63,9 @@ description: Use when a macOS user wants to find, recommend, check, deduplicate,
 
 无法唯一确认、地区不可用或仅有同名近似结果时，将该曲目标为“未解析”，不要替换成其他地区、现场版、翻唱版或相似名称。
 
-生成执行层 JSON 前读取 `references/input-schema.md`。临时文件使用 `mktemp -d` 创建，并在完成或失败后删除；不得包含凭据。
+生成执行层 JSON 前读取 `references/input-schema.md`。临时文件和删除收据目录必须由调用者使用 `mktemp -d` 创建，并在完成或失败后删除；不得包含凭据。删除 token 只保存在当前进程变量中，不得打印、写入日志、写入说明文档或回传给用户。
 
-## 执行和确认
+## 添加的执行和确认
 
 始终先通过下列机器入口执行试运行：
 
@@ -82,11 +83,27 @@ zsh scripts/invoke.sh add --playlist "目标列表" --input "临时输入.json" 
 
 实际写入仍使用 `scripts/invoke.sh add`，去掉 `--dry-run` 并保留其余已经确认的参数。不要直接调用技能外的绝对路径或要求用户复制命令。
 
+## 删除的批准门
+
+删除只接受一个明确播放列表中的具体曲目清单。每项必须同时包含当前播放列表快照中的 `databaseId`、曲名和艺人；三项必须逐字精确且唯一匹配。
+
+只有用户在当前会话明确批准了目标播放列表和这份具体删除清单，才可实际删除。普通“删除”“清理”请求先汇报 dry-run 的精确匹配结果并集中请求一次批准；“确认删除这 28 首”等已明确批准表达不重复询问。批准不能沿用到另一清单、另一播放列表或后续会话。
+
+实际删除前必须依次完成：
+
+1. 在调用者明确创建的同一临时目录内准备输入文件和空收据子目录；设置退出清理，成功或失败都删除整个临时目录。
+2. 调用 `scripts/invoke.sh remove --playlist "目标列表" --input "删除清单.json" --receipt-dir "收据目录" --dry-run --json`。在进程内捕获 JSON，不把其中的 `removalReceiptToken` 打印或记录。
+3. 核对全部结果。任何缺失、歧义、无权限、列表变化或失败都停止；不得删剩余项，也不得执行同一请求中的新增。
+4. 用户已明确批准且 dry-run 清单完全一致时，调用 `scripts/invoke.sh remove`，保留同一 `--playlist`、`--input`、`--receipt-dir`，去掉 `--dry-run`，并追加 `--approved --receipt-token "原样 token" --json`。token 不得自行计算、修改或重新生成。
+5. 只根据执行层写后复核结果报告删除成功。收据缺失、伪造、重放或快照变化会零写入；重新 dry-run 后必须重新核对结果，变化时重新获得用户批准。
+
+混合新增和删除请求不得退化为只新增。先完成已批准的精确删除及写后复核，再执行新增；任一删除安全门失败就停止本次新增。不得绕过 `scripts/invoke.sh` 直接调用二进制、JXA 或“音乐”App 自动化。
+
 ## 结果处理
 
 按用户当前会话语言回复，并保持机器状态枚举不变。汇报：请求总数、已新增、已存在、未解析、失败和目标播放列表；只列出非成功项的简短原因，除非用户要求完整逐首报告。
 
-执行层会按曲名和艺人规范化去重，并在每次添加后重新读取播放列表。只有写后复核存在才声称成功。单首失败不阻断后续曲目；大量任务保留已完成结果和剩余进度，重试时不要重复处理已复核成功的项目。
+添加执行层会按曲名和艺人规范化去重，并在每次添加后重新读取播放列表。删除执行层只对三字段精确唯一匹配调用删除，并在每次删除后重新读取同一播放列表。只有写后复核达到目标状态才声称成功。添加的单首失败不阻断后续曲目；大量添加任务保留已完成结果和剩余进度，重试时不要重复处理已复核成功的项目。
 
 退出码含义：`0` 成功或全部重复；`2` 参数或输入错误；`3` 辅助功能权限不足；`4` 播放列表不存在；`5` 未找到、复核失败或其他执行错误。
 
@@ -96,4 +113,5 @@ zsh scripts/invoke.sh add --playlist "目标列表" --input "临时输入.json" 
 - 不读取或保存 Apple ID 密码、Cookie、MusicKit 令牌、开发者密钥或付款信息。
 - 不把完整播放列表发送到远程服务；去重和复核留在本机。
 - 不使用截图、OCR、固定坐标或近似曲名点击。
-- 不删除、移动、重排、下载或分享曲目；`scripts/invoke.sh` 也只接受 `add`。
+- 禁止模糊删除、按条件批量清理、整表删除、跨播放列表删除，以及删除或移动音乐资料库文件。
+- 不移动、重排、下载或分享曲目；`scripts/invoke.sh` 只接受 `add` 和 `remove`，其他命令一律拒绝。
