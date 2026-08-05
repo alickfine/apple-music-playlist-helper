@@ -39,3 +39,30 @@
 - 未对真实 Music.app 执行删除，以免开发验证触发不可逆写入；核心工作流、跨进程收据、CLI 参数门、包装路由和 JXA 目标边界由自动测试覆盖。
 - token 按接口要求经命令行原样传递；技能必须在同一受控进程中捕获 dry-run JSON，不打印或持久记录 token，并在完成或失败后删除调用者临时目录。
 - 文件收据存储不会自行创建全局目录；调用者必须显式传入已存在目录。目录不可用时 CLI 中文失败并零写入。
+
+## 审查修复第 1 轮
+
+### 修复内容
+
+- 文件收据消费不再使用 `rename` 抢占和失败恢复。现在通过已验证目录描述符 `openat(O_NOFOLLOW)` 打开收据，使用 `flock(LOCK_EX | LOCK_NB)` 获取跨进程独占锁，在锁内读取并完整比较工件；只对同一路径、同一 inode 且链接数仍为 1 的完全匹配文件执行 `unlinkat`。工件不匹配保留原文件，并发、锁冲突、已消费和重放均失败关闭。
+- 收据目录先以 `lstat` 拒绝符号链接，再用 `open(O_DIRECTORY | O_NOFOLLOW)` 与 `fstat` 防止打开时替换；只接受 `owner == geteuid()` 且 group/other 权限为 0 的目录。每次操作前重新检查目录权限，权限后来放宽也停止。
+- 收据文件直接以 `openat(O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, 0600)` 创建，写入、`fsync` 和关闭任一步失败都会删除不完整文件；读取和消费还会复核普通文件、owner 和精确 `0600`。
+- `remove` 必须通过命令行或输入 JSON 明确指定播放列表；缺失时返回中文参数错误。`add` 继续保留默认“试音”，未回归。
+- 安全删除设计和实施计划已改为：先对 28 首 dry-run、实际删除并结构化核验；任一失败立即停止新增；全部通过后才 dry-run 并新增 20 首，避免只新增至 78 首。
+- 顶层 README 已补齐中文 add/remove 能力、输入格式、一次性收据安全流程、全部参数和混合操作顺序；技能正文、输入规范和分发助手同步更新。
+
+### TDD 与验证记录
+
+#### RED
+
+- 新增 CLI 测试后，`swift test --filter FileRemovalReceiptStoreTests` 首先因 `CLIOptionsError.missingRemovalPlaylist` 不存在而编译失败；证明 remove 显式播放列表契约先于实现。
+- 目录运行期权限测试先得到非空 token 和已创建文件，明确暴露“初始化后目录权限放宽仍可写”的缺口。
+- 对独占锁保护执行突变检查：暂时移除生产 `flock` 后，锁冲突测试错误返回已消费且原收据消失，2 个断言按预期失败；恢复锁后重新通过。
+
+#### GREEN
+
+- `swift test --filter CLIOptionsTests`：14/14 通过。
+- `swift test --filter FileRemovalReceiptStoreTests`：9/9 通过，覆盖目录 symlink、group/other 权限、owner 边界、运行期权限变化、文件 `0600`、工件不匹配保留、锁冲突保留、并发仅一次消费和伪造 token。
+- `swift test`：73/73 通过。
+- 全部 `Tests/SkillPackageTests/*.sh` 通过，独立技能 Release 构建成功。
+- 分发源码与顶层 `Sources` 无差异；全部相关 zsh 脚本语法检查和 `git diff --check` 通过。

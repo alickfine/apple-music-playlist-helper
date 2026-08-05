@@ -104,4 +104,23 @@ final class CLIOptionsTests: XCTestCase {
         XCTAssertThrowsError(try options.resolvedPlaylist(documentPlaylist: "JSON"))
         XCTAssertEqual(try options.resolvedPlaylist(documentPlaylist: nil), "命令行")
     }
+
+    func testRemoveRequiresExplicitPlaylistFromCommandOrDocument() throws {
+        let options = try CLIOptions.parse([
+            "remove", "--input", "removals.json", "--receipt-dir", "/tmp/receipts",
+            "--dry-run", "--json",
+        ])
+
+        XCTAssertThrowsError(try options.resolvedPlaylist(documentPlaylist: nil)) { error in
+            XCTAssertEqual(error as? CLIOptionsError, .missingRemovalPlaylist)
+            XCTAssertEqual(error.localizedDescription, "remove 命令必须通过 --playlist 或输入 JSON 明确指定播放列表。")
+        }
+        XCTAssertEqual(try options.resolvedPlaylist(documentPlaylist: "明确列表"), "明确列表")
+    }
+
+    func testAddKeepsHistoricalDefaultPlaylist() throws {
+        let options = try CLIOptions.parse(["add", "--input", "tracks.json"])
+
+        XCTAssertEqual(try options.resolvedPlaylist(documentPlaylist: nil), "试音")
+    }
 }

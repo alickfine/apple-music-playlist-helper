@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import PlaylistCore
 
@@ -67,6 +68,82 @@ final class FileRemovalReceiptStoreTests: XCTestCase {
         XCTAssertFalse(consumed)
     }
 
+    func testRejectsSymlinkAndGroupOrOtherAccessibleReceiptDirectories() throws {
+        let target = try temporaryDirectory()
+        let symlink = target.deletingLastPathComponent()
+            .appendingPathComponent("am-playlist-receipts-link-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: symlink)
+            try? FileManager.default.removeItem(at: target)
+        }
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
+
+        XCTAssertThrowsError(try FileRemovalReceiptStore(directory: symlink))
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o750], ofItemAtPath: target.path
+        )
+        XCTAssertThrowsError(try FileRemovalReceiptStore(directory: target))
+    }
+
+    func testRejectsDirectoryNotOwnedByEffectiveUserAtValidationBoundary() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertNoThrow(try FileRemovalReceiptStore(directory: directory))
+        XCTAssertThrowsError(try FileRemovalReceiptStore(
+            directory: directory, effectiveUserID: geteuid() &+ 1
+        ))
+    }
+
+    func testReceiptFileIsCreatedWithOwnerOnly0600Permissions() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try FileRemovalReceiptStore(directory: directory)
+
+        let token = await store.issue(receiptArtifact(snapshot: "snapshot"))
+        var metadata = stat()
+        XCTAssertEqual(lstat(directory.appendingPathComponent("\(token).json").path, &metadata), 0)
+        XCTAssertEqual(metadata.st_mode & 0o777, 0o600)
+        XCTAssertEqual(metadata.st_uid, geteuid())
+    }
+
+    func testOperationsFailClosedIfDirectoryPermissionsBecomeUnsafe() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try FileRemovalReceiptStore(directory: directory)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: directory.path
+        )
+
+        let token = await store.issue(receiptArtifact(snapshot: "snapshot"))
+
+        XCTAssertTrue(token.isEmpty)
+        XCTAssertTrue((try FileManager.default.contentsOfDirectory(atPath: directory.path)).isEmpty)
+    }
+
+    func testLockedReceiptCannotBeConsumedAndOriginalRemainsAvailable() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let artifact = receiptArtifact(snapshot: "snapshot")
+        let store = try FileRemovalReceiptStore(directory: directory)
+        let token = await store.issue(artifact)
+        let path = directory.appendingPathComponent("\(token).json").path
+        let descriptor = open(path, O_RDONLY | O_NOFOLLOW)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        defer {
+            _ = flock(descriptor, LOCK_UN)
+            _ = close(descriptor)
+        }
+        XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+
+        let consumed = await store.consume(token: token, matching: artifact)
+        let stored = await store.receipt(for: token)
+
+        XCTAssertFalse(consumed)
+        XCTAssertEqual(stored, artifact)
+    }
+
     private func receiptArtifact(snapshot: String) -> RemovalReceiptArtifact {
         let track = RemovalTrack(databaseID: "123", name: "测试曲目", artist: "测试艺人")
         return RemovalReceiptArtifact(
@@ -81,7 +158,11 @@ final class FileRemovalReceiptStoreTests: XCTestCase {
     private func temporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("am-playlist-receipts-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
         return directory
     }
 }

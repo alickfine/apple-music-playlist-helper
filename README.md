@@ -1,6 +1,6 @@
 # Apple Music 播放列表助手
 
-这是一个本机 macOS 自然语言技能和底层命令行助手：用户可以描述任意曲风、任意 Apple Music 商店区域和任意数量的歌曲，把尚未存在的曲目依次加入指定播放列表。它不需要 Apple Developer Program，也不把 Apple Music 账号凭据交给第三方服务。
+这是一个本机 macOS 自然语言技能和底层命令行助手：用户可以描述任意曲风、任意 Apple Music 商店区域和任意数量的歌曲，把尚未存在的曲目加入指定播放列表，或从一个明确播放列表安全删除当前会话已批准的精确曲目清单。它不需要 Apple Developer Program，也不把 Apple Music 账号凭据交给第三方服务。
 
 ## 自然语言 Skill
 
@@ -22,6 +22,7 @@
 - “推荐 35 首适合晚餐的歌，加入晚餐列表。”
 - “按加拿大区查找这些歌曲，直接加入收藏。”
 - “只检查这 135 首哪些已在健身列表，不要修改。”
+- “确认从试听删除这份精确的 28 首清单，核验后再新增这 20 首。”
 
 技能不固定曲风、区域或数量。区域依次采用当次请求、Apple Music 链接、用户默认配置和 macOS 系统区域；仍无法确定时只询问一次。用户列出的歌曲全部保留；推荐请求没有数量时会询问，不会自行默认 10 首或 20 首。
 
@@ -29,15 +30,16 @@
 
 ## 工作方式与安全边界
 
-工具通过“音乐”App 自带的脚本接口读取目标播放列表，通过 macOS 辅助功能树定位目录 ID 完全一致的曲目，再按播放列表完整名称执行添加。它不使用截图、OCR、固定坐标或近似曲名。
+工具通过“音乐”App 自带的脚本接口读取目标播放列表。添加使用 macOS 辅助功能树定位目录 ID 完全一致的曲目；删除只通过结构化 JXA 在一个明确播放列表内按本机数据库 ID、曲名和艺人三项逐字唯一匹配曲目引用。它不使用截图、OCR、固定坐标或近似曲名。
 
 默认情况下它：
 
 - 不创建不存在的播放列表；只有 `--create` 会创建。
 - 不自动播放；只有 `--play-first` 会播放首个新增曲目。
-- 不删除、移动、重排、下载或分享曲目。
+- 不执行模糊、整表、跨播放列表或资料库文件删除，也不移动、重排、下载或分享曲目。
 - 不修改其他播放列表，也不输出未请求的资料库内容。
 - 每次添加后重新读取目标播放列表，复核成功后才报告“已添加”。
+- 删除必须先 dry-run，实际执行要求当前会话明确批准、同一私有临时收据目录和原样一次性 token；每次删除后重新读取同一列表，复核成功后才报告“已删除”。
 
 ## 系统要求与权限
 
@@ -72,7 +74,7 @@ swift build -c release
 rm "$HOME/.local/bin/am-playlist"
 ```
 
-## 输入格式
+## 添加输入格式
 
 输入文件必须是 UTF-8 JSON。`playlist` 可省略；若命令行已经提供 `--playlist`，JSON 中不得再次提供。
 
@@ -91,6 +93,25 @@ rm "$HOME/.local/bin/am-playlist"
 ```
 
 `id` 必须只含 ASCII 数字；`url` 必须使用 `https://music.apple.com`，并且唯一的 `i` 参数必须与 `id` 完全一致。写入前应确认曲目在用户所用 Apple Music 商店区域中仍可搜索。
+
+## 删除输入格式
+
+删除 JSON 每项必须来自同一播放列表的当前结构化快照：
+
+```json
+{
+  "playlist": "试音",
+  "tracks": [
+    {
+      "databaseId": "123456789",
+      "name": "曲名",
+      "artist": "艺人"
+    }
+  ]
+}
+```
+
+`remove` 必须通过 JSON 的 `playlist` 或 `--playlist` 明确指定播放列表，不能使用默认列表。三字段必须逐字唯一匹配；空清单、通配符、近似名称、类别、位置和“全部重复项”都不会被解释成删除条件。
 
 ## 使用方法
 
@@ -112,16 +133,39 @@ am-playlist add --playlist "试音" --input Fixtures/tracks.example.json --dry-r
 am-playlist add --playlist "试音" --input Fixtures/tracks.example.json
 ```
 
+安全删除使用由调用者创建的私有临时目录。dry-run 的 JSON 含一次性 `removalReceiptToken`；下面在进程变量中捕获它，不要打印或写入日志：
+
+```bash
+临时目录=$(mktemp -d)
+trap 'rm -rf -- "$临时目录"' EXIT
+收据目录="$临时目录/receipts"
+mkdir -m 700 "$收据目录"
+
+试运行JSON=$(am-playlist remove --playlist "试音" --input "$临时目录/removals.json" \
+  --receipt-dir "$收据目录" --dry-run --json)
+收据令牌=$(printf '%s' "$试运行JSON" | plutil -extract removalReceiptToken raw -o - -- -)
+
+am-playlist remove --playlist "试音" --input "$临时目录/removals.json" \
+  --receipt-dir "$收据目录" --approved --receipt-token "$收据令牌" --json
+unset 收据令牌 试运行JSON
+```
+
+实际删除前必须人工核对 dry-run 清单与当前会话批准的清单完全一致。收据目录必须是当前用户拥有、group/other 无权限且非符号链接的目录。token 只能使用一次；伪造、重放、快照变化或文件锁冲突都会零写入。
+
 全部支持的参数：
 
-- `add`：唯一支持的子命令。
+- `add`：添加和去重；未提供播放列表时保留历史默认“试音”。
+- `remove`：只删除当前会话批准的单列表精确清单；必须明确播放列表。
 - `--input <路径>`：必需，输入 JSON 文件。
-- `--playlist <名称>`：可选，指定目标播放列表；不能与 JSON 的 `playlist` 同时使用。
+- `--playlist <名称>`：指定目标播放列表；不能与 JSON 的 `playlist` 同时使用。`remove` 必须由二者之一提供。
 - `--create`：目标不存在时创建；默认不创建。
-- `--dry-run`：只读取、校验并报告计划，不执行添加或播放。
+- `--dry-run`：只读取、校验并报告计划，不执行添加、删除或播放；删除试运行还必须带 `--json` 和 `--receipt-dir`。
 - `--play-first`：添加结束后播放首个新增曲目。
 - `--timeout <秒>`：等待目录 ID 出现在辅助功能树中的正整数秒数，默认 8 秒。
 - `--json`：输出机器可读 JSON；否则输出中文文本。
+- `--receipt-dir <路径>`：仅用于删除；调用者创建的私有临时收据目录。
+- `--approved`：仅用于实际删除，表示当前会话已批准具体清单。
+- `--receipt-token <令牌>`：仅用于实际删除，必须原样使用同目录 dry-run 返回的一次性 token。
 
 ## 退出码
 
@@ -140,6 +184,10 @@ am-playlist add --playlist "试音" --input Fixtures/tracks.example.json
 “播放列表不存在”：先在“音乐”中手动创建，或在明确需要时添加 `--create`。
 
 “写后复核未找到曲目”：工具已经停止继续声称成功；请在“音乐”中检查网络、目录可用性和播放列表状态后重试。
+
+“收据目录无效”：重新使用 `mktemp -d` 创建当前用户私有目录，并确保它不是符号链接且没有 group/other 权限。不要复制、长期保存或共享收据文件和 token。
+
+混合删除和新增时，必须先完成删除 dry-run、实际删除和结构化核验；任何删除失败都停止新增。只有 28 首删除全部核验通过后，才对 20 首新增 dry-run 并实际添加，避免只新增导致列表达到 78 首。
 
 ## 开发验证
 

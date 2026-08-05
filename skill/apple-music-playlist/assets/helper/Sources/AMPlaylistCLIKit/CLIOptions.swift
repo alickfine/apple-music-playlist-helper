@@ -18,6 +18,7 @@ public enum CLIOptionsError: LocalizedError, Equatable {
     case removalDryRunRequiresJSON
     case removalDryRunCannotBeApproved
     case missingRemovalApproval
+    case missingRemovalPlaylist
 
     public var errorDescription: String? {
         switch self {
@@ -33,6 +34,7 @@ public enum CLIOptionsError: LocalizedError, Equatable {
         case .removalDryRunRequiresJSON: "删除试运行必须同时提供 --dry-run 和 --json，以便返回一次性收据。"
         case .removalDryRunCannotBeApproved: "删除试运行不得提供 --approved 或 --receipt-token。"
         case .missingRemovalApproval: "实际删除必须同时提供 --approved 和 --receipt-token。"
+        case .missingRemovalPlaylist: "remove 命令必须通过 --playlist 或输入 JSON 明确指定播放列表。"
         }
     }
 }
@@ -132,6 +134,9 @@ public struct CLIOptions: Equatable, Sendable {
 
     public func resolvedPlaylist(documentPlaylist: String?) throws -> String {
         if playlist != nil, documentPlaylist != nil { throw CLIOptionsError.conflictingPlaylistSources }
+        if command == .remove, playlist == nil, documentPlaylist == nil {
+            throw CLIOptionsError.missingRemovalPlaylist
+        }
         return playlist ?? documentPlaylist ?? "试音"
     }
 }
