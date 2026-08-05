@@ -24,6 +24,51 @@ public struct TrackInputDocument: Codable, Equatable, Sendable {
     }
 }
 
+public struct TrackKey: Hashable, Codable, Sendable {
+    public let name: String
+    public let artist: String
+
+    public init(name: String, artist: String) {
+        self.name = TextNormalization.normalize(name)
+        self.artist = TextNormalization.normalize(artist)
+    }
+}
+
+public enum TrackOperationStatus: String, Codable, Equatable, Sendable {
+    case added
+    case skippedDuplicate
+    case notFound
+    case permissionDenied
+    case playlistMissing
+    case verificationFailed
+    case failed
+}
+
+public struct TrackOperationResult: Codable, Equatable, Sendable {
+    public let track: CatalogTrack?
+    public let status: TrackOperationStatus
+    public let message: String
+
+    public init(track: CatalogTrack?, status: TrackOperationStatus, message: String) {
+        self.track = track
+        self.status = status
+        self.message = message
+    }
+}
+
+public struct WorkflowReport: Codable, Equatable, Sendable {
+    public let results: [TrackOperationResult]
+
+    public init(results: [TrackOperationResult]) {
+        self.results = results
+    }
+
+    public var exitCode: Int32 {
+        let successful: Set<TrackOperationStatus> = [.added, .skippedDuplicate]
+        return results.allSatisfy { successful.contains($0.status) } ? 0 : 5
+    }
+}
+
 public enum TrackValidationError: Error, Equatable, Sendable {
     case invalidCatalogID
     case emptyName
