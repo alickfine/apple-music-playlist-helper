@@ -1,65 +1,65 @@
-# Apple Music Playlist Helper Design
+# Apple Music 播放列表助手设计
 
-## Objective
+## 目标
 
-Build a local macOS command-line helper that adds Apple Music catalog tracks to an existing Music app playlist without model-driven screenshots or per-step UI inspection. The helper must not require Apple Developer Program membership, developer tokens, cloud services, or third-party credentials.
+构建一个运行于 macOS 本机的命令行助手，在不使用模型截图或逐步读取界面的情况下，把 Apple Music 目录曲目加入“音乐”App 的播放列表。该助手不得依赖 Apple Developer Program 会员、开发者令牌、云端服务或第三方凭据。
 
-The first supported workflow is adding China-storefront tracks selected by the Apple Music catalog connector to the existing playlist named `试音`.
+首个支持场景是：把 Apple Music 目录连接器在中国大陆 storefront 中匹配到的曲目加入现有的“试音”播放列表。
 
-## Approved Scope
+## 已批准范围
 
-- Accept catalog tracks as structured JSON containing `id`, `name`, `artist`, and an Apple Music URL.
-- Add tracks to an arbitrary named user playlist in the macOS Music app.
-- Detect duplicates using normalized track name and artist before any UI mutation.
-- Fail if the target playlist does not exist unless the caller explicitly supplies `--create`.
-- Support `--dry-run` to validate input, permissions, playlist existence, and duplicates without mutation.
-- Support `--play-first` to play the first successfully added or already-present requested track.
-- Verify every reported addition by reading the target playlist again.
-- Continue past per-track failures, report all results, and return a nonzero exit status when any requested track fails.
+- 接收结构化 JSON 曲目数据，每首包含 `id`、`name`、`artist` 和 Apple Music URL。
+- 把曲目加入 macOS“音乐”App 中任意指定名称的用户播放列表。
+- 在执行任何界面写入前，使用规范化后的曲名与艺人组合检测重复项。
+- 目标播放列表不存在时默认失败；只有调用方明确传入 `--create` 才允许创建。
+- 支持 `--dry-run`：只检查输入、权限、播放列表和重复项，不执行写入。
+- 支持 `--play-first`：验证完成后播放本次请求中的第一首曲目。
+- 重新读取目标播放列表，验证每一项声称成功的添加操作。
+- 单首失败后继续处理其他曲目，完整报告所有结果；只要存在失败曲目，进程就返回非零退出码。
 
-Out of scope for the first version:
+首个版本不包含以下内容：
 
-- Deleting, moving, reordering, favoriting, downloading, or sharing tracks.
-- Editing existing playlist metadata.
-- Apple Music API authentication or Developer Program integration.
-- Screenshot recognition, fixed screen coordinates, or model-in-the-loop UI control.
-- General Music app automation unrelated to playlist insertion.
+- 删除、移动、重新排序、收藏、下载或分享曲目。
+- 修改现有播放列表的元数据。
+- Apple Music API 认证或 Developer Program 集成。
+- 截图识别、固定屏幕坐标或由模型实时参与的界面控制。
+- 与播放列表写入无关的通用“音乐”App 自动化。
 
-## Alternatives Considered
+## 备选方案
 
-### Native Swift CLI with Accessibility API — selected
+### 原生 Swift CLI 与 Accessibility API——已选定
 
-Use Swift and `AXUIElement` to identify Music app elements by stable accessibility identifiers and catalog track IDs. This approach is local, testable, does not require screenshots, and can keep business logic independent from the live app driver.
+使用 Swift 和 `AXUIElement`，通过稳定的辅助功能标识符和目录曲目 ID 定位“音乐”App 元素。该方案完全在本机运行、可测试、不依赖截图，并能让业务逻辑与真实 App 驱动相互独立。
 
-### AppleScript with System Events
+### AppleScript 与 System Events
 
-This is simpler to prototype but depends more heavily on localized menu strings and UI hierarchy. It remains useful for read-only playlist inventory where the Music scripting dictionary is reliable, but it is not the primary mutation driver.
+这种方案原型开发更简单，但更依赖本地化菜单文字和界面层级。“音乐”App 脚本字典能够可靠读取播放列表时，可将其用于只读清单；写入操作不以它作为主要驱动。
 
-### macOS Shortcuts
+### macOS 快捷指令
 
-Shortcuts offers a convenient permission model, but its Music actions do not provide a dependable way to select exact Apple Music catalog versions by storefront catalog ID and then verify each insertion. It is not used in version one.
+快捷指令的权限模型方便，但其“音乐”操作无法稳定地依据 storefront 目录 ID 选择准确的 Apple Music 版本，也难以逐首验证写入结果，因此首个版本不采用。
 
-## User Interface
+## 用户接口
 
-The executable is named `am-playlist`.
+可执行文件名为 `am-playlist`。
 
-Primary command:
+主要命令：
 
 ```bash
 am-playlist add --playlist "试音" --input tracks.json
 ```
 
-Optional flags:
+可选参数：
 
 ```text
---create               Create the playlist if it does not exist.
---dry-run              Perform no mutations.
---play-first           Play the first requested track after verification.
---timeout <seconds>    Per-track wait timeout. Default: 8.
---json                 Emit machine-readable JSON results.
+--create               目标播放列表不存在时创建它。
+--dry-run              不执行任何写入。
+--play-first           验证后播放本次请求中的第一首曲目。
+--timeout <seconds>    单首曲目的等待超时；默认值为 8 秒。
+--json                 输出机器可读的 JSON 结果。
 ```
 
-Input schema:
+输入格式：
 
 ```json
 {
@@ -75,106 +75,106 @@ Input schema:
 }
 ```
 
-The `--playlist` option overrides the optional top-level `playlist` field. Each URL must use HTTPS, use the `music.apple.com` host, and contain an `i` query parameter equal to the supplied numeric catalog ID.
+`--playlist` 参数优先于可选的顶层 `playlist` 字段。每个 URL 必须使用 HTTPS、主机必须是 `music.apple.com`，并且必须包含与所提供数字目录 ID 相同的 `i` 查询参数。
 
-## Architecture
+## 架构
 
-The Swift package is divided into focused units:
+Swift Package 按职责拆分为以下单元：
 
-- `PlaylistCore`: input models, validation, normalization, duplicate detection, result aggregation, and workflow orchestration.
-- `MusicAppProtocol`: interfaces for playlist inventory, playlist creation, track insertion, verification, and playback.
-- `MusicAccessibilityDriver`: the production implementation using Music app URL navigation and macOS Accessibility APIs.
-- `MusicScriptReader`: a narrow read-only adapter for playlist and track inventory through the Music scripting dictionary when available.
-- `AMPlaylistCLI`: argument parsing, JSON input/output, exit codes, and user-facing diagnostics.
+- `PlaylistCore`：输入模型、校验、规范化、重复检测、结果汇总和工作流编排。
+- `MusicAppProtocol`：播放列表清单、播放列表创建、曲目写入、验证和播放接口。
+- `MusicAccessibilityDriver`：使用“音乐”App URL 导航和 macOS Accessibility API 的生产驱动。
+- `MusicScriptReader`：在“音乐”脚本字典可用时，以只读方式获取播放列表和曲目清单的窄适配器。
+- `AMPlaylistCLI`：参数解析、JSON 输入输出、退出码和面向用户的诊断信息。
 
-The workflow depends only on protocols. Unit and driver-contract tests use deterministic fakes and accessibility fixtures; they never launch or mutate Music.
+工作流只依赖协议。单元测试和驱动契约测试使用确定性的伪实现与辅助功能树 fixture，绝不启动或修改“音乐”App。
 
-## Data Flow
+## 数据流
 
-1. Decode the JSON document and CLI options.
-2. Validate every track before launching Music.
-3. Check Accessibility authorization without prompting. If missing, return `permission_denied` with the exact System Settings location. A future explicit setup command may request permission, but ordinary `add` never triggers an unexpected prompt.
-4. Read the target playlist inventory.
-5. If the playlist is missing, fail unless `--create` is present.
-6. Normalize Unicode, whitespace, case, and punctuation for the requested and existing `(name, artist)` keys.
-7. Mark existing matches as `skipped_duplicate`.
-8. For each remaining track, open its exact catalog URL in Music.
-9. Poll the Accessibility tree until an album-track element containing the requested catalog ID appears or the timeout expires.
-10. From that exact element, invoke its `More` action and select the exact target playlist.
-11. Re-read the playlist and verify the normalized `(name, artist)` key is present.
-12. Optionally play the first requested track only when `--play-first` was supplied.
-13. Emit a complete result summary and derive the process exit status.
+1. 解码 JSON 文档和命令行参数。
+2. 在启动“音乐”App 前校验全部曲目。
+3. 检查辅助功能授权，但不自动弹出授权提示。如果权限缺失，返回 `permission_denied`，并指出“系统设置”中的准确位置。未来可以增加显式设置命令来请求权限，但普通 `add` 命令不得意外触发权限提示。
+4. 读取目标播放列表清单。
+5. 如果播放列表不存在，除非传入 `--create`，否则失败。
+6. 对请求曲目和现有曲目的 `(name, artist)` 键统一进行 Unicode、空白、大小写和标点规范化。
+7. 把已有匹配项标记为 `skipped_duplicate`。
+8. 对每一首剩余曲目，在“音乐”App 中打开其准确目录 URL。
+9. 轮询辅助功能树，直到出现包含所请求目录 ID 的专辑曲目元素，或达到超时。
+10. 从该准确元素调用“更多”，再选择名称完全一致的目标播放列表。
+11. 重新读取播放列表，验证规范化后的 `(name, artist)` 键已经存在。
+12. 只有传入 `--play-first` 时，才播放本次请求中的第一首曲目。
+13. 输出完整结果汇总，并据此计算进程退出码。
 
-## Safety Invariants
+## 安全不变量
 
-- Never click a track by list position, visual coordinate, or approximate title.
-- Never select a different catalog ID as a fallback.
-- Never create a playlist without `--create`.
-- Never delete, move, reorder, download, share, or alter existing items.
-- Never store Apple credentials, browser data, tokens, or cookies.
-- Never print private Music library contents beyond the requested playlist and requested track results.
-- A failed track does not roll back successful additions because Music provides no safe atomic playlist transaction. The result must clearly identify partial success.
-- Re-running the same input is idempotent through preflight duplicate detection.
+- 绝不按列表位置、视觉坐标或近似曲名点击曲目。
+- 绝不以其他目录 ID 作为回退版本。
+- 未传入 `--create` 时绝不创建播放列表。
+- 绝不删除、移动、重新排序、下载、分享或修改现有项目。
+- 绝不存储 Apple 凭据、浏览器数据、令牌或 Cookie。
+- 除所请求的播放列表和曲目结果外，绝不打印用户的私人音乐资料库内容。
+- “音乐”App 没有安全的原子播放列表事务，因此单首失败不会撤销已成功的添加；结果必须清楚报告部分成功状态。
+- 通过写入前的重复检测，保证使用同一输入重复运行时保持幂等。
 
-## Result Model and Exit Codes
+## 结果模型与退出码
 
-Each requested track receives exactly one status:
+每首请求曲目必须得到且只能得到以下一种状态：
 
-- `added`: insertion was verified.
-- `skipped_duplicate`: the target playlist already contains the normalized name and artist.
-- `not_found`: the exact catalog ID did not appear before the timeout.
-- `permission_denied`: Accessibility permission is unavailable.
-- `playlist_missing`: the target playlist does not exist and `--create` was not supplied.
-- `verification_failed`: the insertion action completed but the track was not found during verification.
-- `failed`: another explicit, captured error occurred.
+- `added`：已验证写入成功。
+- `skipped_duplicate`：目标播放列表已经包含规范化后曲名与艺人相同的项目。
+- `not_found`：达到超时前没有出现准确目录 ID。
+- `permission_denied`：没有辅助功能权限。
+- `playlist_missing`：目标播放列表不存在，且未传入 `--create`。
+- `verification_failed`：写入动作已经完成，但验证时没有在播放列表中找到该曲目。
+- `failed`：发生了其他已捕获且有明确信息的错误。
 
-Exit codes:
+退出码：
 
-- `0`: every track is `added` or `skipped_duplicate`.
-- `2`: invalid CLI arguments or invalid input.
-- `3`: missing Accessibility authorization.
-- `4`: target playlist missing without `--create`.
-- `5`: one or more per-track operations failed after preflight.
+- `0`：所有曲目状态均为 `added` 或 `skipped_duplicate`。
+- `2`：命令行参数或输入无效。
+- `3`：缺少辅助功能授权。
+- `4`：目标播放列表不存在，且未传入 `--create`。
+- `5`：预检后的一项或多项曲目操作失败。
 
-## Testing Strategy
+## 测试策略
 
-All production behavior is developed test-first.
+所有生产行为均按照测试先行方式开发。
 
-### Unit tests
+### 单元测试
 
-- Reject nonnumeric IDs, non-Apple hosts, non-HTTPS URLs, and mismatched URL IDs.
-- Normalize composed and decomposed Unicode, repeated whitespace, letter case, and common punctuation consistently.
-- Detect existing `(name, artist)` pairs and preserve distinct versions with different artists.
-- Map result sets to the documented exit codes.
-- Confirm `--create`, `--dry-run`, and `--play-first` affect only their documented behaviors.
+- 拒绝非数字 ID、非 Apple Music 主机、非 HTTPS URL，以及 URL 中目录 ID 与字段 ID 不一致的输入。
+- 对组合与分解 Unicode、重复空白、字母大小写和常见标点执行一致的规范化。
+- 检测已有 `(name, artist)` 组合，同时保留艺人不同的同名版本。
+- 把不同结果集合映射为文档规定的退出码。
+- 确认 `--create`、`--dry-run` 和 `--play-first` 只影响各自文档规定的行为。
 
-### Driver-contract tests
+### 驱动契约测试
 
-- Given an Accessibility fixture with several tracks, select only the element whose identifier contains the requested catalog ID.
-- Refuse to act when the exact ID is absent.
-- Select only the exact target playlist menu item.
-- Time out deterministically through an injected clock.
-- Verify that no mutation methods run during `--dry-run`.
+- 给定包含多首曲目的辅助功能 fixture，只选择标识符中包含所请求目录 ID 的元素。
+- 准确 ID 不存在时拒绝执行写入。
+- 只选择名称完全一致的目标播放列表菜单项。
+- 通过注入时钟，以确定性方式验证超时。
+- 确认 `--dry-run` 期间不会调用任何写入方法。
 
-### Local integration tests
+### 本机集成测试
 
-1. Run `--dry-run` against the existing `试音` playlist.
-2. Use a dedicated temporary playlist and add one verified China-storefront track.
-3. Run the same command again and verify `skipped_duplicate` with no count change.
-4. Remove the temporary playlist only after the user authorizes cleanup; otherwise leave it clearly named for manual removal.
-5. Run the final nonmutating acceptance check against `试音`, where an existing track must be reported as `skipped_duplicate` and the current count must remain 58.
+1. 针对现有“试音”播放列表运行 `--dry-run`。
+2. 使用专用临时播放列表添加一首已经确认属于中国大陆 storefront 的曲目。
+3. 使用同一命令再次运行，确认返回 `skipped_duplicate`，且曲目数量不变。
+4. 只有用户明确授权清理时才删除临时播放列表；否则保留一个名称清晰、便于手动删除的临时播放列表。
+5. 最终针对“试音”执行非写入验收：其中一首现有曲目必须返回 `skipped_duplicate`，播放列表数量必须保持 58 首。
 
-## Permissions and Installation
+## 权限与安装
 
-The helper requires Accessibility permission for its executable or hosting terminal. It does not request Full Disk Access, Automation access to unrelated apps, network configuration changes, or Apple account credentials.
+助手的可执行文件或承载它的终端需要辅助功能权限。它不要求完全磁盘访问权限，不要求控制无关 App，不修改网络配置，也不需要 Apple 账号凭据。
 
-The first version builds locally with the installed Swift 6.3 toolchain and macOS 26 SDK. Installation is a local symlink or copied executable under a user-controlled bin directory; no privileged installer is required.
+首个版本使用本机已安装的 Swift 6.3 工具链和 macOS 26 SDK 构建。安装方式是在用户控制的 bin 目录中创建本地符号链接或复制可执行文件，不使用需要管理员权限的安装器。
 
-## Success Criteria
+## 成功标准
 
-- A 20-track catalog input can be processed without screenshots or model inspection of the Music UI.
-- Existing requested tracks are skipped without duplication.
-- Exact catalog IDs gate all UI mutations.
-- The helper verifies additions and reports partial failure precisely.
-- Missing playlists are not created without `--create`.
-- The automated test suite passes, and the final acceptance check leaves the existing `试音` playlist at 58 tracks.
+- 包含 20 首曲目的目录输入能够在不使用截图、不让模型检查“音乐”界面的情况下完成处理。
+- 已存在的请求曲目会被跳过，不产生重复项。
+- 所有界面写入都必须由准确目录 ID 触发。
+- 助手会验证写入并准确报告部分失败。
+- 未传入 `--create` 时不会创建缺失的播放列表。
+- 自动化测试套件全部通过；最终验收后，现有“试音”播放列表仍保持 58 首。
