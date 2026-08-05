@@ -8,10 +8,10 @@ set -euo pipefail
 [[ -f "${技能目录}/agents/openai.yaml" ]] || { print -u2 '缺少 agents/openai.yaml'; exit 1; }
 [[ ! -e "${技能目录}/README.md" ]] || { print -u2 '技能分发目录不得包含 README.md'; exit 1; }
 
-名称=$(awk '/^---$/{区块++; next} 区块==1 && /^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}' "${技能目录}/SKILL.md")
+名称=$(awk '/^---$/{section++; next} section==1 && /^name:/{sub(/^name:[[:space:]]*/, ""); print; exit}' "${技能目录}/SKILL.md")
 [[ "${名称}" == 'apple-music-playlist' ]] || { print -u2 "技能名错误：${名称}"; exit 1; }
 
-字段=$(awk '/^---$/{区块++; next} 区块==1 && /^[a-zA-Z0-9_-]+:/{sub(/:.*/, ""); print}' "${技能目录}/SKILL.md" | LC_ALL=C sort | tr '\n' ' ')
+字段=$(awk '/^---$/{section++; next} section==1 && /^[a-zA-Z0-9_-]+:/{sub(/:.*/, ""); print}' "${技能目录}/SKILL.md" | LC_ALL=C sort | tr '\n' ' ')
 [[ "${字段}" == 'description name ' ]] || { print -u2 "frontmatter 只能包含 name 和 description，实际为：${字段}"; exit 1; }
 
 if rg -n '/Users/macmini|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9]{20,}' "${技能目录}"; then
