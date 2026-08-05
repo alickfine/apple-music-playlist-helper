@@ -14,6 +14,14 @@ public struct CatalogTrack: Codable, Equatable, Sendable {
     }
 }
 
+public extension CatalogTrack {
+    var albumID: String? {
+        url.pathComponents.last { component in
+            !component.isEmpty && component.unicodeScalars.allSatisfy { (48...57).contains($0.value) }
+        }
+    }
+}
+
 public struct TrackInputDocument: Codable, Equatable, Sendable {
     public let playlist: String?
     public let tracks: [CatalogTrack]

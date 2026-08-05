@@ -46,6 +46,20 @@ if ! print -r -- "${删除小节}" | rg -q 'remove.*必须.*playlist|playlist.*r
   exit 1
 fi
 
+if ! rg -q 'TopSearchLockup' "${技能目录}/SKILL.md" ||
+   ! rg -q 'AlbumTrackLockup' "${技能目录}/SKILL.md"; then
+  print -u2 '技能缺少搜索结果与专辑页的目录 ID 双重校验说明'
+  exit 1
+fi
+if ! rg -q '不使用截图、OCR、固定坐标' "${技能目录}/SKILL.md"; then
+  print -u2 '技能缺少可执行的无视觉坐标安全边界'
+  exit 1
+fi
+if ! rg -q '不得.*替换.*目录 ID|不得.*目录 ID.*替换' "${技能目录}/SKILL.md"; then
+  print -u2 '技能缺少禁止目录版本替换的安全边界'
+  exit 1
+fi
+
 while IFS= read -r 文件; do
   if file "${文件}" | rg -q 'Mach-O'; then
     print -u2 "技能初始包包含预编译二进制：${文件}"

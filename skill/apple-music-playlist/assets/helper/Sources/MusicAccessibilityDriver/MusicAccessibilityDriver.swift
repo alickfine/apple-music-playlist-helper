@@ -8,17 +8,20 @@ public struct MusicAccessibilityDriver: MusicAppClient, Sendable {
     private let urlOpener: any URLOpening
     private let scripts: MusicScriptReader
     private let pollInterval: Duration
+    private let directLookupTimeout: Duration
 
     public init(
         accessibility: any AccessibilityProviding = AXMusicAccessibilityProvider(),
         urlOpener: any URLOpening = MusicURLOpener(),
         scripts: MusicScriptReader = MusicScriptReader(),
-        pollInterval: Duration = .milliseconds(150)
+        pollInterval: Duration = .milliseconds(150),
+        directLookupTimeout: Duration = .seconds(1)
     ) {
         self.accessibility = accessibility
         self.urlOpener = urlOpener
         self.scripts = scripts
         self.pollInterval = pollInterval
+        self.directLookupTimeout = directLookupTimeout
     }
 
     public func accessibilityAuthorized() async -> Bool {
@@ -41,23 +44,62 @@ public struct MusicAccessibilityDriver: MusicAppClient, Sendable {
         try await urlOpener.openInMusic(track.url)
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
+        let directDeadline = min(deadline, clock.now.advanced(by: directLookupTimeout))
 
+        if let more = try await poll(until: directDeadline, matching: { tree in
+            AccessibilityMatcher.trackMoreButton(catalogID: track.id, in: tree)
+        }) {
+            return try submit(more: more, to: playlist)
+        }
+
+        guard clock.now < deadline else { return .notFound }
+        try accessibility.send(.commandF)
+        guard let searchField = try await poll(until: deadline, matching: { tree in
+            AccessibilityMatcher.searchField(in: tree)
+        }) else { return .notFound }
+
+        try accessibility.setValue("\(track.name) \(track.artist)", path: searchField)
+        if pollInterval > .zero {
+            try await Task.sleep(for: pollInterval)
+        }
+        try accessibility.send(.downArrow)
+        try accessibility.send(.returnKey)
+
+        guard let result = try await poll(until: deadline, matching: { tree in
+            AccessibilityMatcher.topSearchResult(catalogID: track.id, in: tree)
+                ?? track.albumID.flatMap { AccessibilityMatcher.albumSearchResult(albumID: $0, in: tree) }
+        }) else { return .notFound }
+        try accessibility.press(path: result)
+
+        guard let more = try await poll(until: deadline, matching: { tree in
+            AccessibilityMatcher.trackMoreButton(catalogID: track.id, in: tree)
+        }) else { return .notFound }
+        return try submit(more: more, to: playlist)
+    }
+
+    private func poll(
+        until deadline: ContinuousClock.Instant,
+        matching: @Sendable (AccessibilityNodeSnapshot) -> AccessibilityPath?
+    ) async throws -> AccessibilityPath? {
+        let clock = ContinuousClock()
         while true {
             let tree = try accessibility.musicTree()
-            if let more = AccessibilityMatcher.trackMoreButton(catalogID: track.id, in: tree) {
-                try accessibility.press(path: more)
-                let menuTree = try accessibility.musicTree()
-                guard let target = AccessibilityMatcher.playlistMenuItem(named: playlist, in: menuTree) else {
-                    return .notFound
-                }
-                try accessibility.press(path: target)
-                return .submitted
-            }
-            guard clock.now < deadline else { return .notFound }
+            if let match = matching(tree) { return match }
+            guard clock.now < deadline else { return nil }
             if pollInterval > .zero {
                 try await Task.sleep(for: pollInterval)
             }
         }
+    }
+
+    private func submit(more: AccessibilityPath, to playlist: String) throws -> AddTrackOutcome {
+        try accessibility.press(path: more)
+        let menuTree = try accessibility.musicTree()
+        guard let target = AccessibilityMatcher.playlistMenuItem(named: playlist, in: menuTree) else {
+            return .notFound
+        }
+        try accessibility.press(path: target)
+        return .submitted
     }
 
     public func remove(_ track: RemovalTrack, from playlist: String) async throws {
@@ -93,6 +135,8 @@ public enum AccessibilityDriverError: LocalizedError, Sendable {
     case attributeReadFailed(String)
     case invalidPath
     case pressFailed(Int32)
+    case valueSetFailed(Int32)
+    case keyEventCreationFailed
 
     public var errorDescription: String? {
         switch self {
@@ -100,6 +144,8 @@ public enum AccessibilityDriverError: LocalizedError, Sendable {
         case let .attributeReadFailed(attribute): "无法读取“音乐”的辅助功能属性：\(attribute)。"
         case .invalidPath: "辅助功能元素路径已失效，未执行点击。"
         case let .pressFailed(code): "辅助功能按压失败（错误码 \(code)）。"
+        case let .valueSetFailed(code): "无法写入 Music 搜索框（错误码 \(code)）。"
+        case .keyEventCreationFailed: "无法创建 Music 键盘事件。"
         }
     }
 }
@@ -113,14 +159,60 @@ public final class AXMusicAccessibilityProvider: AccessibilityProviding, @unchec
     }
 
     public func press(path: AccessibilityPath) throws {
-        var element = try applicationElement()
-        for index in path.indices {
-            let children = children(of: element)
-            guard children.indices.contains(index) else { throw AccessibilityDriverError.invalidPath }
-            element = children[index]
-        }
+        let element = try element(at: path)
         let error = AXUIElementPerformAction(element, kAXPressAction as CFString)
         guard error == .success else { throw AccessibilityDriverError.pressFailed(error.rawValue) }
+    }
+
+    public func setValue(_ value: String, path: AccessibilityPath) throws {
+        let element = try element(at: path)
+        let error = AXUIElementSetAttributeValue(
+            element,
+            kAXValueAttribute as CFString,
+            value as CFString
+        )
+        guard error == .success else { throw AccessibilityDriverError.valueSetFailed(error.rawValue) }
+    }
+
+    public func send(_ keyStroke: MusicKeyStroke) throws {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").first else {
+            throw AccessibilityDriverError.musicNotRunning
+        }
+        app.activate()
+
+        let virtualKey: CGKeyCode
+        let flags: CGEventFlags
+        switch keyStroke {
+        case .commandF:
+            virtualKey = 3
+            flags = .maskCommand
+        case .downArrow:
+            virtualKey = 125
+            flags = []
+        case .returnKey:
+            virtualKey = 36
+            flags = []
+        }
+
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false) else {
+            throw AccessibilityDriverError.keyEventCreationFailed
+        }
+        keyDown.flags = flags
+        keyUp.flags = flags
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    private func element(at path: AccessibilityPath) throws -> AXUIElement {
+        var element = try applicationElement()
+        for index in path.indices {
+            let currentChildren = children(of: element)
+            guard currentChildren.indices.contains(index) else { throw AccessibilityDriverError.invalidPath }
+            element = currentChildren[index]
+        }
+        return element
     }
 
     private func applicationElement() throws -> AXUIElement {
