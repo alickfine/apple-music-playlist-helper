@@ -132,3 +132,55 @@ swift test && git diff --check
 
 - Task 4 的 CLI 分流必须显式传入 `RemovalWorkflowOptions`；真正执行前只能接受当前 dry-run 回传的原样指纹和明确批准，不能自行生成或替换指纹。
 - Task 3 仍负责真实 JXA 删除；在它完成前，默认驱动保持安全失败。
+
+## 审查修复第 2 轮
+
+### 修复内容
+
+- 删除了可自行计算确认指纹作为授权凭据的机制，改为一次性 `removalReceiptToken`。
+- 新增 `RemovalReceiptStore` 协议、收据工件和内存收据存储。内存存储通过 `SecRandomCopyBytes` 生成 32 字节随机 token，并在 actor 内原子比对、消费，禁止重放。
+- dry-run 将播放列表名、完整有序删除清单、完整播放列表快照 SHA-256 指纹、每项精确匹配结果与实际 `would_remove` 集合保存为收据工件，仅返回随机 token。
+- 实际删除要求 `approved: true`、尚未消费的 token 和完全相同的当前工件。收据缺失、伪造、已消费、播放列表任意变化，或缺失/歧义结果后来变为唯一时均零写入并要求重新试运行。
+- 保留上一轮 `would_remove` 中文渲染与写后复核异常后的可信快照恢复逻辑。
+
+### TDD 记录
+
+#### RED
+
+命令：
+
+```sh
+swift test --filter RemovalWorkflowTests
+```
+
+结果：失败，符合预期。测试编译报告缺少 `RemovalReceiptStore`、`RemovalReceiptArtifact`、`receiptStore:` 初始化参数和 `receiptToken:` 授权参数，证明收据安全契约先于实现建立。
+
+#### GREEN
+
+命令：
+
+```sh
+swift test --filter RemovalWorkflowTests
+swift test --filter ResultRenderingTests
+```
+
+结果：通过。删除工作流 11 个测试、渲染 3 个测试，均为 0 个失败；覆盖无存储收据、伪造 token、未批准、重放、任意快照变化、缺失/歧义 dry-run 后变唯一和正确收据删除。
+
+#### 最终验证
+
+命令：
+
+```sh
+swift test && git diff --check
+```
+
+结果：通过。Swift 全量 56 个测试、0 个失败；差异检查无输出。
+
+### 提交
+
+- `447d6423ec5c465e0b38150630bddb386e4211c8 fix: require one-time removal receipts`
+
+### 更新后的关注点
+
+- Task 4 的文件收据存储必须以等价的原子“匹配后消费”语义持久化 token，且 token 不得出现在普通日志、错误输出或归档内容中。
+- 仅获得 token 仍不足以删除：CLI 必须显式提供 `approved: true`，并在实际运行前保留当前快照工件的完全一致校验。
