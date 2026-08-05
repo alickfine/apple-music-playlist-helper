@@ -22,7 +22,7 @@ final class MusicScriptReaderTests: XCTestCase {
         let script = await runner.lastScript
         XCTAssertTrue(script.contains("app.userPlaylists().filter(p => p.name() === \"试音\")"))
         XCTAssertTrue(script.contains("lists.length !== 1"))
-        XCTAssertTrue(script.contains("String(t.databaseId()) === \"905228611\""))
+        XCTAssertTrue(script.contains("String(t.databaseID()) === \"905228611\""))
         XCTAssertTrue(script.contains("t.name() === \"被遗忘的时光\""))
         XCTAssertTrue(script.contains("t.artist() === \"蔡琴\""))
         XCTAssertTrue(script.contains("matches.length !== 1"))
@@ -81,6 +81,9 @@ private actor OutputChannelCheckingRunner: ProcessRunning {
     func run(executable: URL, arguments: [String], stdin: Data?) throws -> ProcessResult {
         let script = String(decoding: stdin ?? Data(), as: UTF8.self)
         let json = Data(#"{"name":"试音","tracks":[{"name":"被遗忘的时光","artist":"蔡琴"}]}"#.utf8)
+        if script.contains("databaseId()") {
+            return .init(exitCode: 1, stdout: Data(), stderr: Data("Music JXA 不存在 databaseId() 属性".utf8))
+        }
         if script.contains("console.log") {
             return .init(exitCode: 0, stdout: Data(), stderr: json)
         }
@@ -93,6 +96,9 @@ private actor CapturingProcessRunner: ProcessRunning {
 
     func run(executable: URL, arguments: [String], stdin: Data?) throws -> ProcessResult {
         lastScript = String(decoding: stdin ?? Data(), as: UTF8.self)
+        if lastScript.contains("databaseId()") {
+            return .init(exitCode: 1, stdout: Data(), stderr: Data("Music JXA 不存在 databaseId() 属性".utf8))
+        }
         return .init(exitCode: 0, stdout: Data(), stderr: Data())
     }
 }

@@ -37,7 +37,7 @@ public struct MusicScriptReader: Sendable {
           output = 'null';
         } else {
           const p = lists[0];
-          const tracks = p.tracks().map(t => ({name: t.name(), artist: t.artist(), databaseId: String(t.databaseId())}));
+          const tracks = p.tracks().map(t => ({name: t.name(), artist: t.artist(), databaseId: String(t.databaseID())}));
           output = JSON.stringify({name: p.name(), tracks: tracks});
         }
         output;
@@ -73,7 +73,7 @@ public struct MusicScriptReader: Sendable {
         if (lists.length !== 1) throw new Error('目标播放列表不唯一');
         const playlist = lists[0];
         const matches = playlist.tracks().filter(t =>
-          String(t.databaseId()) === \(quotedDatabaseID) &&
+          String(t.databaseID()) === \(quotedDatabaseID) &&
           t.name() === \(quotedName) &&
           t.artist() === \(quotedArtist)
         );
