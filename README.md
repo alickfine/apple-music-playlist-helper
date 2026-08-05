@@ -4,7 +4,19 @@
 
 ## 自然语言 Skill
 
-安装到 Codex 的默认全局技能目录：
+从 GitHub 获取并安装：
+
+```bash
+git clone https://github.com/alickfine/apple-music-playlist-helper.git
+cd apple-music-playlist-helper
+./scripts/install-skill-local.sh
+```
+
+安装完成后，新建一个 Codex 任务并直接用自然语言描述要查找的歌曲、商店区域、数量和目标播放列表。例如：
+
+> 使用 Apple Music 技能，在中国区找 50 首覆盖人声、乐器、低频和动态的试音曲，去重后加入“试音”播放列表。
+
+如果已经下载项目，也可以直接安装到 Codex 的默认全局技能目录：
 
 ```bash
 ./scripts/install-skill-local.sh
