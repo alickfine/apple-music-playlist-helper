@@ -34,6 +34,18 @@ if rg -n "${待办一}|${待办二}|待补充|稍后实现|占位内容" "${技�
   exit 1
 fi
 
+输入规范="${技能目录}/references/input-schema.md"
+添加小节=$(awk '/^## 添加 JSON 结构$/{active=1; next} /^## /{active=0} active' "${输入规范}")
+删除小节=$(awk '/^## 删除 JSON 结构$/{active=1; next} /^## /{active=0} active' "${输入规范}")
+if print -r -- "${添加小节}" | rg -q 'remove.*必须.*playlist|playlist.*remove.*必须'; then
+  print -u2 '添加 JSON 小节混入了 remove 的显式播放列表规则'
+  exit 1
+fi
+if ! print -r -- "${删除小节}" | rg -q 'remove.*必须.*playlist|playlist.*remove.*必须'; then
+  print -u2 '删除 JSON 小节缺少 remove 的显式播放列表规则'
+  exit 1
+fi
+
 while IFS= read -r 文件; do
   if file "${文件}" | rg -q 'Mach-O'; then
     print -u2 "技能初始包包含预编译二进制：${文件}"
