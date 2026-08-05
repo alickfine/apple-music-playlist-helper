@@ -146,5 +146,7 @@ private actor FakeMusicAppClient: MusicAppClient {
         return addOutcomes.isEmpty ? .submitted : addOutcomes.removeFirst()
     }
 
+    func remove(_ track: RemovalTrack, from playlist: String) {}
+
     func play(track: CatalogTrack, in playlist: String) { playCount += 1; playedTrackID = track.id }
 }
