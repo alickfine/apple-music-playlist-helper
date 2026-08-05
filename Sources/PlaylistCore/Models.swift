@@ -36,11 +36,11 @@ public struct TrackKey: Hashable, Codable, Sendable {
 
 public enum TrackOperationStatus: String, Codable, Equatable, Sendable {
     case added
-    case skippedDuplicate
-    case notFound
-    case permissionDenied
-    case playlistMissing
-    case verificationFailed
+    case skippedDuplicate = "skipped_duplicate"
+    case notFound = "not_found"
+    case permissionDenied = "permission_denied"
+    case playlistMissing = "playlist_missing"
+    case verificationFailed = "verification_failed"
     case failed
 }
 
