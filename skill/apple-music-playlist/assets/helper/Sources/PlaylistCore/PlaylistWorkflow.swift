@@ -20,11 +20,15 @@ public struct PlaylistWorkflow: Sendable {
             if let existing = try await client.playlist(named: playlistName) {
                 snapshot = existing
             } else if options.create {
-                try await client.createPlaylist(named: playlistName)
-                guard let created = try await client.playlist(named: playlistName) else {
-                    return missingPlaylistReport(playlistName)
+                if options.dryRun {
+                    snapshot = PlaylistSnapshot(name: playlistName, tracks: [])
+                } else {
+                    try await client.createPlaylist(named: playlistName)
+                    guard let created = try await client.playlist(named: playlistName) else {
+                        return missingPlaylistReport(playlistName)
+                    }
+                    snapshot = created
                 }
-                snapshot = created
             } else {
                 return missingPlaylistReport(playlistName)
             }

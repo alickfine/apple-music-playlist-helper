@@ -53,6 +53,20 @@ final class PlaylistWorkflowTests: XCTestCase {
         XCTAssertEqual(playCount, 0)
     }
 
+    func testDryRunWithCreatePlansAgainstEmptyPlaylistWithoutCreating() async {
+        let client = FakeMusicAppClient(playlist: nil)
+        let report = await PlaylistWorkflow(client: client).run(
+            document: .init(playlist: "临时测试", tracks: [first]),
+            options: .init(create: true, dryRun: true)
+        )
+
+        XCTAssertEqual(report.results.map(\.status), [.added])
+        let createCount = await client.createCount
+        let addCount = await client.addCount
+        XCTAssertEqual(createCount, 0)
+        XCTAssertEqual(addCount, 0)
+    }
+
     func testDuplicateIsSkippedAndSuccessfulAddIsVerified() async {
         let existing = PlaylistSnapshot(name: "试音", tracks: [.init(name: first.name, artist: first.artist)])
         let verified = PlaylistSnapshot(name: "试音", tracks: [
