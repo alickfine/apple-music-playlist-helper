@@ -37,7 +37,7 @@ public struct MusicScriptReader: Sendable {
           output = 'null';
         } else {
           const p = lists[0];
-          const tracks = p.tracks().map(t => ({name: t.name(), artist: t.artist()}));
+          const tracks = p.tracks().map(t => ({name: t.name(), artist: t.artist(), databaseId: String(t.databaseId())}));
           output = JSON.stringify({name: p.name(), tracks: tracks});
         }
         output;
@@ -58,6 +58,27 @@ public struct MusicScriptReader: Sendable {
         let script = """
         const app = Application('Music');
         app.userPlaylists.push(app.UserPlaylist({name: \(quotedName)}));
+        """
+        _ = try await execute(script)
+    }
+
+    public func remove(_ track: RemovalTrack, from playlistName: String) async throws {
+        let quotedPlaylist = try javaScriptLiteral(playlistName)
+        let quotedDatabaseID = try javaScriptLiteral(track.databaseID)
+        let quotedName = try javaScriptLiteral(track.name)
+        let quotedArtist = try javaScriptLiteral(track.artist)
+        let script = """
+        const app = Application('Music');
+        const lists = app.userPlaylists().filter(p => p.name() === \(quotedPlaylist));
+        if (lists.length !== 1) throw new Error('目标播放列表不唯一');
+        const playlist = lists[0];
+        const matches = playlist.tracks().filter(t =>
+          String(t.databaseId()) === \(quotedDatabaseID) &&
+          t.name() === \(quotedName) &&
+          t.artist() === \(quotedArtist)
+        );
+        if (matches.length !== 1) throw new Error('曲目不再唯一');
+        app.delete(matches[0]);
         """
         _ = try await execute(script)
     }

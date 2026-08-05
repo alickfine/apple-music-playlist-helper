@@ -12,6 +12,12 @@ public struct PlaylistTrack: Codable, Equatable, Sendable {
     }
 
     public var key: TrackKey { TrackKey(name: name, artist: artist) }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case artist
+        case databaseID = "databaseId"
+    }
 }
 
 public struct PlaylistSnapshot: Codable, Equatable, Sendable {

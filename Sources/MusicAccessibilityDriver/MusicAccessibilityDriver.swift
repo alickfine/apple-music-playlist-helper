@@ -60,6 +60,10 @@ public struct MusicAccessibilityDriver: MusicAppClient, Sendable {
         }
     }
 
+    public func remove(_ track: RemovalTrack, from playlist: String) async throws {
+        try await scripts.remove(track, from: playlist)
+    }
+
     public func play(track: CatalogTrack, in playlist: String) async throws {
         try await scripts.play(track: track, in: playlist)
     }

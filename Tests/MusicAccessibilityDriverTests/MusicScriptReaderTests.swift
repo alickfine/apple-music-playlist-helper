@@ -5,10 +5,28 @@ import PlaylistCore
 
 final class MusicScriptReaderTests: XCTestCase {
     func testDecodesOnlyRequestedPlaylistSnapshot() async throws {
-        let json = #"{"name":"试音","tracks":[{"name":"被遗忘的时光","artist":"蔡琴"}]}"#.data(using: .utf8)!
+        let json = #"{"name":"试音","tracks":[{"name":"被遗忘的时光","artist":"蔡琴","databaseId":"905228611"}]}"#.data(using: .utf8)!
         let runner = FakeProcessRunner(results: [.init(exitCode: 0, stdout: json, stderr: Data())])
         let snapshot = try await MusicScriptReader(runner: runner).playlist(named: "试音")
-        XCTAssertEqual(snapshot, .init(name: "试音", tracks: [.init(name: "被遗忘的时光", artist: "蔡琴")]))
+        XCTAssertEqual(snapshot, .init(name: "试音", tracks: [.init(name: "被遗忘的时光", artist: "蔡琴", databaseID: "905228611")]))
+    }
+
+    func testRemoveTargetsOneExactTrackReferenceInOneExactPlaylist() async throws {
+        let runner = CapturingProcessRunner()
+
+        try await MusicScriptReader(runner: runner).remove(
+            .init(databaseID: "905228611", name: "被遗忘的时光", artist: "蔡琴"),
+            from: "试音"
+        )
+
+        let script = await runner.lastScript
+        XCTAssertTrue(script.contains("app.userPlaylists().filter(p => p.name() === \"试音\")"))
+        XCTAssertTrue(script.contains("lists.length !== 1"))
+        XCTAssertTrue(script.contains("String(t.databaseId()) === \"905228611\""))
+        XCTAssertTrue(script.contains("t.name() === \"被遗忘的时光\""))
+        XCTAssertTrue(script.contains("t.artist() === \"蔡琴\""))
+        XCTAssertTrue(script.contains("matches.length !== 1"))
+        XCTAssertTrue(script.contains("app.delete(matches[0])"))
     }
 
     func testNullMeansPlaylistDoesNotExist() async throws {
@@ -67,5 +85,14 @@ private actor OutputChannelCheckingRunner: ProcessRunning {
             return .init(exitCode: 0, stdout: Data(), stderr: json)
         }
         return .init(exitCode: 0, stdout: json, stderr: Data())
+    }
+}
+
+private actor CapturingProcessRunner: ProcessRunning {
+    private(set) var lastScript = ""
+
+    func run(executable: URL, arguments: [String], stdin: Data?) throws -> ProcessResult {
+        lastScript = String(decoding: stdin ?? Data(), as: UTF8.self)
+        return .init(exitCode: 0, stdout: Data(), stderr: Data())
     }
 }
