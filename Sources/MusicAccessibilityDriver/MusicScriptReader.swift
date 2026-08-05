@@ -57,7 +57,7 @@ public struct MusicScriptReader: Sendable {
         let quotedName = try javaScriptLiteral(name)
         let script = """
         const app = Application('Music');
-        app.userPlaylists.push(app.UserPlaylist({name: \(quotedName)}));
+        app.make({new: 'userPlaylist', withProperties: {name: \(quotedName)}});
         """
         _ = try await execute(script)
     }

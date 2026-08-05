@@ -29,6 +29,16 @@ final class MusicScriptReaderTests: XCTestCase {
         XCTAssertTrue(script.contains("app.delete(matches[0])"))
     }
 
+    func testCreatePlaylistUsesMusicMakeCommandInsteadOfArrayPush() async throws {
+        let runner = CapturingProcessRunner()
+
+        try await MusicScriptReader(runner: runner).createPlaylist(named: "临时测试")
+
+        let script = await runner.lastScript
+        XCTAssertTrue(script.contains("app.make({new: 'userPlaylist', withProperties: {name: \"临时测试\"}})"))
+        XCTAssertFalse(script.contains("userPlaylists.push"))
+    }
+
     func testNullMeansPlaylistDoesNotExist() async throws {
         let runner = FakeProcessRunner(results: [
             .init(exitCode: 0, stdout: Data("null\n".utf8), stderr: Data())
