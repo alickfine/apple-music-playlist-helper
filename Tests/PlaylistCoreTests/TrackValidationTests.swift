@@ -51,6 +51,28 @@ final class TrackValidationTests: XCTestCase {
         assertValidationError(.emptyArtist, for: track)
     }
 
+    func testLargeInputRetainsEveryTrackInOrder() throws {
+        let tracks = (1...135).map { index in
+            let id = String(900_000_000 + index)
+            return makeTrack(
+                id: id,
+                name: "曲目 \(index)",
+                artist: "艺人 \(index)",
+                url: "https://music.apple.com/ca/album/example/1?i=\(id)"
+            )
+        }
+        let document = TrackInputDocument(playlist: "大量曲目", tracks: tracks)
+
+        let decoded = try JSONDecoder().decode(
+            TrackInputDocument.self,
+            from: JSONEncoder().encode(document)
+        )
+
+        XCTAssertEqual(decoded.tracks.count, 135)
+        XCTAssertEqual(decoded.tracks.first?.name, "曲目 1")
+        XCTAssertEqual(decoded.tracks.last?.name, "曲目 135")
+    }
+
     private func makeTrack(
         id: String = "905228611",
         name: String = "被遗忘的时光",
