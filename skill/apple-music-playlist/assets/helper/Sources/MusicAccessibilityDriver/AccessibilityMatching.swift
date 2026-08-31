@@ -107,7 +107,10 @@ public enum AccessibilityMatcher {
             return identifier.contains("TopSearchLockup")
                 || identifier.contains("SearchLandingBrickLockup")
         } != nil
-        guard isSearchScreen else { return nil }
+        let hasSearchScope = find(node: root, path: []) { node in
+            node.identifier == "UIA.Music.Search.Scope"
+        } != nil
+        guard isSearchScreen || hasSearchScope else { return nil }
         return searchField(in: root)
     }
 

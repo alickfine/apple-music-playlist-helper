@@ -74,7 +74,7 @@ final class AccessibilityMatchingTests: XCTestCase {
         XCTAssertEqual(AccessibilityMatcher.searchField(in: searchTree), .init(indices: [1]))
     }
 
-    func testRequiresSearchScopeBeforeTreatingSearchScreenAsReady() {
+    func testTreatsSearchFieldWithSearchScopeAsReadyBeforeResultsLoad() {
         let staleAlbumTree = AccessibilityNodeSnapshot(role: "AXWindow", children: [
             .init(identifier: "Music.searchField", role: "AXSearchField")
         ])
@@ -88,7 +88,7 @@ final class AccessibilityMatchingTests: XCTestCase {
         ])
 
         XCTAssertNil(AccessibilityMatcher.readySearchField(in: staleAlbumTree))
-        XCTAssertNil(AccessibilityMatcher.readySearchField(in: scopeOnlyTree))
+        XCTAssertEqual(AccessibilityMatcher.readySearchField(in: scopeOnlyTree), .init(indices: [0]))
         XCTAssertEqual(AccessibilityMatcher.readySearchField(in: readySearchTree), .init(indices: [0]))
     }
 
